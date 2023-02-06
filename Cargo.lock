@@ -22,6 +22,7 @@ name = "camloc"
 version = "0.1.0"
 dependencies = [
  "opencv",
+ "uom",
 ]
 
 [[package]]
@@ -51,9 +52,9 @@ dependencies = [
 
 [[package]]
 name = "clang-sys"
-version = "1.4.0"
+version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa2e27ae6ab525c3d369ded447057bca5438d86dc3a68f6faafb8269ba82ebf3"
+checksum = "cfca1104a761dc007de23ef30de763534a837bde4f53ed5f07e52059191eded8"
 dependencies = [
  "glob",
  "libc",
@@ -126,9 +127,9 @@ checksum = "6f61fba1741ea2b3d6a1e3178721804bb716a68a6aeba1149b5d52e3d464ea66"
 
 [[package]]
 name = "opencv"
-version = "0.76.3"
+version = "0.76.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb91300ac0cdd5f2a1cb9ad378ed0c41716ee35529dc43fea65886bfaae2844b"
+checksum = "db9d01bc3042fd3be67e89363422026cdda63857a033e08a3641532f3399da1c"
 dependencies = [
  "cc",
  "clang",
@@ -146,9 +147,9 @@ dependencies = [
 
 [[package]]
 name = "opencv-binding-generator"
-version = "0.55.0"
+version = "0.55.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8aecbf78bc1db1658419b2a7855233cfd16a8ead411b897bf96a0286d4bf81a3"
+checksum = "bf58c69f79d8fd033eac3edfcad286896223e95fa5e51ed4ee6f2faf5a07bce8"
 dependencies = [
  "clang",
  "clang-sys",
@@ -199,6 +200,22 @@ name = "shlex"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43b2853a4d09f215c24cc5489c992ce46052d359b5109343cbafbf26bc62f8a3"
+
+[[package]]
+name = "typenum"
+version = "1.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "497961ef93d974e23eb6f433eb5fe1b7930b659f06d12dec6fc44a8f554c0bba"
+
+[[package]]
+name = "uom"
+version = "0.33.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53e68fe0bfdacf0a6cef0efec5dcc295b836cde69b01ad93feb18488fa82050d"
+dependencies = [
+ "num-traits",
+ "typenum",
+]
 
 [[package]]
 name = "vcpkg"
