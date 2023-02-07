@@ -1,217 +1,193 @@
-use opencv::{highgui, prelude::*, videoio, Result, imgcodecs::{self, imread}, imgproc};
-
-static WNAME: &'static str = "OPENCV Testo";
-
-// ---- OPENCV ----
-
-pub fn kepu() -> Result<()> {
-    let img = imread("/home/moi/dev/robo/camloc/test/1.jpg", imgcodecs::IMREAD_COLOR)?;
-    if img.empty() {
-		panic!("Error opening image");
-	}
-    
-	highgui::named_window(WNAME, highgui::WINDOW_AUTOSIZE)?;
-	
-	let mut p = opencv::core::Point::from((100, 100));
-
-	let (w, h) = (img.cols(), img.rows());
-
-    loop {
-		let mut img = img.clone();
-		
-		imgproc::line(&mut img,
-			opencv::core::Point::from((w / 2, h / 2)), p,
-			opencv::core::Scalar::from((0., 0., 255.)), 2,
-			opencv::imgproc::LINE_8, 0
-		)?;
-		imgproc::circle(&mut img,
-			p, 4, opencv::core::Scalar::from((0., 0., 255.)),
-			-1, opencv::imgproc::LINE_8, 0
-		)?;
-		highgui::imshow(WNAME, &img)?;
-
-		// ---
-        let Some(k) = char::from_u32(highgui::wait_key(50)? as u32) else {
-            continue;
-        };
-        match k {
-            'q' => break,
-			
-			'w' => p.y -= 1,
-			's' => p.y += 1,
-
-			'd' => p.x += 1,
-			'a' => p.x -= 1,
-            
-			_ => (),
-        }
-    }
-    Ok(())
-}
-
-pub fn videjo() -> Result<()> {
-	highgui::named_window(WNAME, highgui::WINDOW_AUTOSIZE)?;
-
-	let mut cam = videoio::VideoCapture::new(0, videoio::CAP_ANY)?; // 0 is the default camera
-	if !videoio::VideoCapture::is_opened(&cam)? {
-		panic!("Unable to open default camera!");
-	}
-
-	loop {
-		let mut frame = Mat::default();
-		cam.read(&mut frame)?;
-		if frame.size()?.width > 0 {
-			highgui::imshow(WNAME, &frame)?;
-		}
-
-		let key = highgui::wait_key(10)?;
-		if key > 0 && key != 255 {
-			break;
-		}
-	}
-
-	Ok(())
-}
-
-// ---- POS ----
-
 extern crate uom;
 
-use uom::si::length::{meter, millimeter, micrometer, inch};
+use nalgebra::Vector2;
+use uom::si::length::meter;
 use uom::si::angle::degree;
 use uom::si::ratio::ratio;
 
 use uom::si::f64::{Length, Angle, Ratio};
 use uom::ConstZero;
 
-/// Physical characteristics of the "arena"
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub struct ArenaInfo {
-    /// Length of the arena walls
-    pub square_size: Length,
-}
-
 /// Physical characteristics of a camera
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub struct CameraInfo {
 
-    /// Dimensions of the physical camera module
-    pub camera_module_size: (Length, Length, Length),
-
     /// Horizontal, vertical Field Of View
-    pub fov: (Angle, Angle),
+    pub fov: Vector2<Angle>,
+    
+    // /// Dimensions of the physical camera module
+    // pub camera_module_size: (Length, Length, Length),
 
-    /// Image resolution
-    pub camera_resolution: (u32, u32),
+    // /// Image resolution
+    // pub camera_resolution: Vector2<u32>,
 
-    /// Width and height of the image sensor
-    pub sensor_image_area: (Length, Length),
-    /// Length of the image sensor diagonal
-    pub sensor_diagonal: Length,
+    // /// Width and height of the image sensor
+    // pub sensor_image_area: Vector2<Length>,
+    // /// Length of the image sensor diagonal
+    // pub sensor_diagonal: Length,
 
-    /// Focal length
-    pub focal_length: Length,
+    // /// Focal length
+    // pub focal_length: Length,
 
-    /// Pixel size
-    pub pixel_size: (Length, Length),
+    // /// Pixel size
+    // pub pixel_size: Vector2<Length>,
 
-    /// Optical size
-    pub optical_size: Length,
+    // /// Optical size
+    // pub optical_size: Length,
 }
 
-/// The "playfield" setup
-#[non_exhaustive]
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub struct Setup {
-    pub arena: ArenaInfo,
-    pub cameras: [CameraInfo; 2],
-
-    /// Distance of cameras from the center (calculated)
-    pub camera_positions: [(Length, Length); 2],
+fn camera_distance(square_size: Length, c: &CameraInfo) -> Length {
+    0.5 * square_size * (
+        Ratio::new::<ratio>(1.) +
+        1. / (0.5 * c.fov.x).tan()
+    )
 }
 
-impl Setup {
-    pub fn new(arena: ArenaInfo, cameras: [CameraInfo; 2]) -> Self {
-		let cd = |c: CameraInfo|
-			0.5 * arena.square_size * (
-            Ratio::new::<ratio>(1.) +
-            1. / (0.5 * c.fov.0).tan()
+fn calc_square_pos_pair(
+    c1: Vector2<Length>, c2: Vector2<Length>,
+    fov1: Angle, fov2: Angle,
+    px1: f64, px2: f64
+) -> Vector2<Length> {
+    let alpha: Angle = fov1 * (0.5 - px1);
+    let atan: Ratio = alpha.tan();
+    
+    let beta: Angle = Angle::new::<degree>(90.) - fov2 * (0.5 - px2);
+    let btan: Ratio = beta.tan();
+
+    let x: Length = (c1.x * atan - c2.x * btan - c1.y + c2.y)
+                        / (atan - btan);
+
+    let y: Length = atan * (x - c1.x) + c1.y;
+
+    Vector2::new(x, y)
+}
+
+#[derive(Debug, PartialEq)]
+pub struct PlacedCamera {
+    info: CameraInfo,
+    pos: Vector2<Length>,
+    rot: Angle,
+}
+
+impl PlacedCamera {
+    pub fn new(info: CameraInfo, pos: Vector2<Length>, rot: Angle) -> Self {
+        Self { info, pos, rot }
+    }
+}
+pub struct Setup<const C: usize> {
+    cameras: [PlacedCamera; C],
+}
+
+impl<const C: usize> Setup<C> {
+    
+    pub fn new_square(square_size: Length, cameras: [CameraInfo; C]) -> Self {
+        debug_assert!(2 <= C && C <= 4, "A square setup may only have 2 or 4 cameras");
+
+        use self::camera_distance as cd;
+
+        let mut cs: [_; C] = unsafe { std::mem::MaybeUninit::uninit().assume_init() };
+        cs[0] = PlacedCamera::new(cameras[0],
+            Vector2::new(-cd(square_size, &cameras[0]), Length::ZERO),
+            Angle::ZERO,
+        );
+        cs[1] = PlacedCamera::new(cameras[1],
+            Vector2::new(Length::ZERO, cd(square_size, &cameras[1])),
+            Angle::new::<degree>(90.),
         );
 
-        Self {
-			arena, cameras,
-			camera_positions: [
-				(-cd(cameras[0]), Length::ZERO),
-				(Length::ZERO, cd(cameras[1])),
-			],
-		}
+        if C >= 3 {
+            cs[2] = PlacedCamera::new(cameras[2],
+                Vector2::new(cd(square_size, &cameras[2]), Length::ZERO),
+                Angle::new::<degree>(180.),
+            );
+        }
+        if C == 4 {
+            cs[3] = PlacedCamera::new(cameras[3],
+                Vector2::new(Length::ZERO, -cd(square_size, &cameras[3])),
+                Angle::new::<degree>(270.),
+            );
+        }
+
+        Self { cameras: cs, }
     }
+    
+    pub fn calculate_position(&self, pxs: [f64; C]) -> Vector2<Length> {
+        let mut tangents: [Ratio; C] = unsafe { std::mem::MaybeUninit::uninit().assume_init() };
 
-    pub fn calculate_position(&self, px1: f64, px2: f64) -> (Length, Length) {
-		let c0p: &(Length, Length) = &self.camera_positions[0];
-		let c1p: &(Length, Length) = &self.camera_positions[1];
-		
-		let fov0: Angle = self.cameras[0].fov.0;
-		let fov1: Angle = self.cameras[1].fov.0;
-		
-		let alpha: Angle = fov0 * (0.5 - px1);
-		let alphatan: Ratio = alpha.tan();
-		
-		let beta: Angle = Angle::new::<degree>(90.) + fov1 * (px2 - 1.);
-		let betan: Ratio = beta.tan();
+        for i in 0..C {
+            tangents[i] = (self.cameras[i].rot - (self.cameras[i].info.fov.x * (0.5 - pxs[i]))).tan();
+        }
 
-		let x: Length = (alphatan * c0p.0 + c0p.1
-						-betan * c1p.0 - c1p.1)
-							/ (alphatan - betan);
+        let mut s: Vector2<Length> = Vector2::new(Length::ZERO, Length::ZERO);
+        for i in 0..C {
+            for j in 0..C {
+                if i == j {
+                    continue;
+                }
 
-        (x, Length::ZERO)
+                let atan: Ratio = tangents[i];
+                let btan: Ratio = tangents[j];
+
+                let c1: Vector2<Length> = self.cameras[i].pos;
+                let c2: Vector2<Length> = self.cameras[j].pos;
+
+                let x: Length = (c1.x * atan - c2.x * btan - c1.y + c2.y)
+                                    / (atan - btan);
+
+                let y: Length = atan * (x - c1.x) + c1.y;
+
+                s += Vector2::new(x, y);
+            }
+        }
+
+        s.x /= 
+        
+        // TODO: remove
+		// calc_square_pos_pair(
+        //     self.cameras[0].pos, self.cameras[1].pos,
+        //     self.cameras[0].info.fov.x, self.cameras[1].info.fov.x,
+        //     pxs[0], pxs[1]
+        // )
     }
 }
 
 fn main() {
 	let picamera = CameraInfo {
-        camera_module_size: (
-            Length::new::<millimeter>(25.0),
-            Length::new::<millimeter>(24.0),
-            Length::new::<millimeter>(9.00),
-        ),
-
-        fov: ( 
+        fov: Vector2::new( 
             Angle::new::<degree>(62.2),
             Angle::new::<degree>(48.8),
         ),
 
-        camera_resolution: (3280, 2464),
+        // camera_module_size: (
+        //     Length::new::<millimeter>(25.0),
+        //     Length::new::<millimeter>(24.0),
+        //     Length::new::<millimeter>(9.00),
+        // ),
 
-        sensor_image_area: (
-            Length::new::<millimeter>(3.68),
-            Length::new::<millimeter>(2.76),
-        ),
-        sensor_diagonal: Length::new::<millimeter>(4.6),
+        // camera_resolution: (3280, 2464),
 
-        focal_length: Length::new::<millimeter>(3.04),
+        // sensor_image_area: (
+        //     Length::new::<millimeter>(3.68),
+        //     Length::new::<millimeter>(2.76),
+        // ),
+        // sensor_diagonal: Length::new::<millimeter>(4.6),
 
-        pixel_size: (
-            Length::new::<micrometer>(1.12),
-            Length::new::<micrometer>(1.12),
-        ),
+        // focal_length: Length::new::<millimeter>(3.04),
 
-        optical_size: Length::new::<inch>(0.25),
+        // pixel_size: (
+        //     Length::new::<micrometer>(1.12),
+        //     Length::new::<micrometer>(1.12),
+        // ),
+
+        // optical_size: Length::new::<inch>(0.25),
     };
-    let setup = Setup::new(
-        ArenaInfo { square_size: Length::new::<meter>(3.0), },
-        [picamera, picamera]
+    let setup = Setup::new_square(
+        Length::new::<meter>(3.0),
+        [picamera, picamera],
 	);
 
-    println!(
-        "Camera positions: {:?}",
-        setup.camera_positions,
-    );
-
-    println!(
-        "Robot position: {:?}",
-        setup.calculate_position(0.48.into(), 0.59.into()),
+    println!("Robot position: {:?}",
+        setup.calculate_position([0.2.into(), 0.3.into()]),
     );
 
 }
-
