@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 
 pub type Position = (f64, f64);
 
@@ -40,7 +41,16 @@ impl<const C: usize> Setup<C> {
             "A square setup may only have 2 or 4 cameras"
         );
 
-        let cd = |c: &CameraInfo| 0.5 * square_size * (1. + 1. / (0.5 * c.fov.0).tan());
+        let mut hmap: HashMap<u64, f64> = HashMap::new();
+        let mut cd = |c: &CameraInfo| {
+            if let Some(v) = hmap.get(&unsafe { std::mem::transmute(c.fov.0) }) {
+                *v
+            } else {
+                let v = 0.5 * square_size * (1. + 1. / (0.5 * c.fov.0).tan());
+                hmap.insert(unsafe { std::mem::transmute(c.fov.0) }, v);
+                v
+            }
+        };
 
         let mut cs: [_; C] = unsafe { std::mem::MaybeUninit::uninit().assume_init() };
         cs[0] = PlacedCamera::new(cameras[0], (-cd(&cameras[0]), 0.), 0f64.to_radians());
