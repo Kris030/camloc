@@ -5,18 +5,25 @@ pub type Position = (f64, f64);
 /// Physical characteristics of a camera
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub struct CameraInfo {
-    /// Horizontal, vertical Field Of View
+    /// Horizontal, vertical FOV (**in radians**)
     pub fov: (f64, f64),
 }
 
 impl CameraInfo {
-    pub fn new(fov: (f64, f64)) -> Self { Self { fov } }
+    /// FOV **in degrees**
+    pub fn new(fov: (f64, f64)) -> Self {
+        Self {
+            fov: (fov.0.to_radians(), fov.1.to_radians())
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
 pub struct PlacedCamera {
     info: CameraInfo,
     pos: Position,
+
+    /// **IN RADIANS**
     rot: f64,
 }
 
@@ -42,41 +49,60 @@ impl<const C: usize> Setup<C> {
         );
 
         let mut hmap: HashMap<u64, f64> = HashMap::new();
-        let mut cd = |c: &CameraInfo| {
-            if let Some(v) = hmap.get(&unsafe { std::mem::transmute(c.fov.0) }) {
-                *v
-            } else {
-                let v = 0.5 * square_size * (1. + 1. / (0.5 * c.fov.0).tan());
-                hmap.insert(unsafe { std::mem::transmute(c.fov.0) }, v);
-                v
+        let cpos = [
+            (-1., 0.),
+            (0., -1.),
+            (1.,  0.),
+            (0., -1.),
+        ];
+        let mut ind = 0;
+        let cameras = cameras
+            .map(|c| {
+                let p = &cpos[ind % 4];
+
+                let bits = unsafe { std::mem::transmute::<f64, u64>(c.fov.0) };
+                let d = match hmap.get(&bits) {
+                    Some(v) => *v,
+                    None => {
+                        let v = 0.5 * square_size * (
+                            1. / (
+                                0.5 * c.fov.0
+                            ).tan() + 1.
+                        );
+                        hmap.insert(unsafe { std::mem::transmute(c.fov.0) }, v);
+                        v
+                    }
+                };
+
+                let info = c;
+                let pos = (p.0 * d, p.1 * d);
+                let rot = (ind as f64) * 90.;
+                ind += 1;
+
+                PlacedCamera::new(
+                    info,
+                    pos,
+                    rot.to_radians()
+                )
             }
-        };
+        );
 
-        let mut cs: [_; C] = unsafe { std::mem::MaybeUninit::uninit().assume_init() };
-        cs[0] = PlacedCamera::new(cameras[0], (-cd(&cameras[0]), 0.), 0f64.to_radians());
-        cs[1] = PlacedCamera::new(cameras[1], (0., -cd(&cameras[1])), 90f64.to_radians());
-
-        if C >= 3 {
-            cs[2] = PlacedCamera::new(cameras[2], (cd(&cameras[2]), 0.), 180f64.to_radians());
-        }
-        if C == 4 {
-            cs[3] = PlacedCamera::new(cameras[3], (0., cd(&cameras[3])), 270f64.to_radians());
-        }
-
-        Self { cameras: cs.into() }
+        Self { cameras }
     }
 
     pub fn calculate_position(&self, pxs: &[Option<f64>; C]) -> Option<Position> {
-        let mut tangents = vec![None; C];
+        let mut tangents = [None; C];
 
-        let mut is = 0u32;
+        let mut lines = 0u32;
         for i in 0..C {
-            tangents[i] = if let Some(x) = pxs[i] {
-                is += 1;
-                Some((self.cameras[i].rot + (self.cameras[i].info.fov.0 * (0.5 - x))).tan())
-            } else { None };
+            if let Some(x) = pxs[i] {
+                tangents[i] = Some(
+                    (self.cameras[i].rot + (self.cameras[i].info.fov.0 * (0.5 - x))).tan()
+                );
+                lines += 1;
+            }
         }
-        if is == 0 {
+        if lines == 0 {
             return None;
         }
 
@@ -99,6 +125,8 @@ impl<const C: usize> Setup<C> {
             }
         }
 
-        Some((s.0 / is as f64, s.1 / is as f64))
+        let points = (lines * (lines - 1) / 2) as f64;
+
+        Some((s.0 / points, s.1 / points))
     }
 }
