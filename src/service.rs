@@ -1,47 +1,99 @@
+#![allow(non_upper_case_globals)]
 #![allow(unused)]
 
-use std::{io::Read, thread::JoinHandle, sync::{RwLock, Mutex}, time::{Instant, Duration}, net::TcpStream};
+use std::{io::Read, thread::{spawn, JoinHandle}, sync::{RwLock, Mutex, mpsc::{channel, Receiver}}, time::{Instant, Duration}, net::TcpStream, borrow::BorrowMut, f64::NAN};
+
 use crate::calc::{Position, Setup};
 
-static mut RUNNING: RwLock<bool> = RwLock::new(false);
+static running: RwLock<bool> = RwLock::new(false);
 
-struct ServiceState {
-	thread_handle: Mutex<JoinHandle<()>>,
-	last_known_pos: RwLock<KnownPosition>,
-}
-pub struct Service<const C: usize> {
-	state: Option<ServiceState>,
+static thread_handle: Mutex<JoinHandle<()>> = unsafe { std::mem::MaybeUninit::uninit().assume_init() };
+static last_known_pos: RwLock<KnownPosition> = RwLock::new(KnownPosition { pos: (NAN, NAN), time: unsafe { std::mem::transmute([0u8; 16]) } });
+static extrap: RwLock<Option<Extrapolation>> = RwLock::new(None);
 
-    extrapolation: Option<Extrapolation>,
-	
+pub fn start<const C: usize>(
 	setup: Setup<C>,
-	hosts: Vec<TcpStream>,
+	addresses: [String; C],
+	extrapolation: Option<Extrapolation>,
+) -> Result<(), String> {
+	let mut r = running.write().map_err(|_| "".to_owned())?;
+	if *r {
+		return Err("Already running".to_owned());
+	}
+	*r = true;
+
+	let handle = spawn(move || run(
+		setup,
+		addresses,
+		extrapolation,
+	));
+
+	Ok(())
 }
 
-impl<const C: usize> Service<C> {
-	pub fn start(setup: Setup<C>, addresses: [String; C], extrapolation: Option<Extrapolation>) -> Result<Service<C>, std::io::Error> {
-		let mut s = Service {
-    		extrapolation,
-			hosts: vec![],
-			state: None,
-			setup,
+async fn run<const C: usize>(
+	setup: Setup<C>,
+	addresses: [String; C],
+	extrapolation: Option<Extrapolation>,
+) {
+	let mut connections: [TcpStream; C] = unsafe { std::mem::MaybeUninit::uninit().assume_init() };
+	for i in 0..C {
+		let Ok(sock) = TcpStream::connect(&addresses[i]) else {
+			return;
+		};
+		connections[i] = sock;
+	}
+	
+	loop {
+		let Ok(r) = running.read() else {
+			break;
+		};
+		if !*r {
+			break;
+		}
+		
+		let Ok(mut posg) = last_known_pos.write() else {
+			break;
 		};
 
-		for c_addr in addresses {
-			s.hosts.push(TcpStream::connect(c_addr)?);
+		let mut pxs = [None; C];
+		for i in 0..C {
+			let mut buf = [0u8; 8];
+			connections[i].read(&mut buf);
+			let px = f64::from_le_bytes(buf);
+
+			if !px.is_nan() {
+				pxs[i] = Some(px);
+			}
 		}
 
-		// let handle = std::thread::spawn(|| );
-
-		Ok(s)
-	}
-
-	pub fn get_position(&self) -> Option<Position> {
-		
-		Some((0., 0.))
+		if let Some(pos) = setup.calculate_position(&pxs) {
+			*posg = KnownPosition { pos, time: Instant::now() };
+		}
 	}
 }
 
+pub fn get_position() -> Option<Position> {
+	if !*running.read().ok()? {
+		return None;
+	}
+
+	let pos = *last_known_pos.read().ok()?;
+	let now = Instant::now();
+
+	if let Ok(ex) = extrap.read() {
+		let x = (*ex).as_ref()?;
+		if now > pos.time + x.invalidate_after {
+			return None;
+		}
+
+		Some(x.extrapolation_type.extrapolate(now))
+	} else {
+		Some(pos.pos)
+	}
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct KnownPosition {
     pos: Position,
     time: Instant,
@@ -49,7 +101,7 @@ pub struct KnownPosition {
 
 pub trait Extrapolator {
     fn add_datapoint(&mut self, position: KnownPosition);
-    fn extrapolate(&self) -> Position;
+    fn extrapolate(&self, time: Instant) -> Position;
 }
 
 pub struct Extrapolation {

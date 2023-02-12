@@ -5,10 +5,10 @@ use crate::calc::{Setup, CameraInfo};
 pub mod service;
 pub mod calc;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), String> {
     let picamera = CameraInfo::new((62.2, 48.2));
 
-    let s = service::Service::start(
+    service::start(
         Setup::new_square(3., [picamera; 2]),
         [
             "192.168.0.123".into(),
@@ -18,7 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     for _ in 0..10 {
-        println!("{:?}", s.get_position());
+        println!("{:?}", service::get_position().ok_or("Couldn't get position".to_owned())?);
         sleep(Duration::from_millis(500));
     }
 

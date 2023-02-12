@@ -56,7 +56,7 @@ impl<const C: usize> Setup<C> {
         Self { cameras: cs.into() }
     }
 
-    pub fn calculate_position(&self, pxs: [Option<f64>; C]) -> Option<Position> {
+    pub fn calculate_position(&self, pxs: &[Option<f64>; C]) -> Option<Position> {
         let mut tangents = vec![None; C];
 
         let mut is = 0u32;
