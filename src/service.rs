@@ -30,20 +30,36 @@ pub fn start<const C: usize>(
 	*ex = extrapolation;
 	drop(ex);
 
-	// let mut connections: [TcpStream; C] = unsafe { std::mem::MaybeUninit::uninit().assume_init() };
-	// for i in 0..C {
-	// 	let Ok(sock) = TcpStream::connect(&addresses[i]) else {
-	// 		return Err(format!("Couldn't connect to {}", addresses[i]));
-	// 	};
-	// 	let Ok(_) = sock.set_read_timeout(Some(Duration::from_secs(1))) else {
-	// 		return Err("Couldn't set read timeout???".to_string());
-	// 	};
-	// 	connections[i] = sock;
-	// }
+	// let connections = addresses.try_map(|a|
+	// 	TcpStream::connect(a)
+	// ).map_err(|_| "Couldn't connect".to_string())?;
+	// FIXME: better ^
+	let connections = {
+		let mut ind = 0;
+		let mut failed = None;
+		let connections = addresses
+			.map(|a| {
+			if let Some(_) = failed {
+				return None;
+			}
+	
+			let ret = if let Ok(c) = TcpStream::connect(a) {
+				let _ = c.set_read_timeout(Some(Duration::from_millis(1000)));
+				Some(c)
+			} else {
+				failed = Some(ind);
+				None
+			};
 
-	let connections = addresses.try_map(|a|
-		TcpStream::connect(a)
-	).map_err(|_| "Couldn't connect".to_string())?;
+			ind += 1;
+
+			ret
+		});
+		if let Some(fi) = failed {
+			return Err(format!("Couldn't connect to host #{fi}"));
+		}
+		connections.map(|c| c.unwrap())
+	};
 
 	let handle = spawn(move ||
 		run(
@@ -110,6 +126,10 @@ pub fn get_position() -> Option<Position> {
 	}
 
 	let pos = *last_known_pos.read().ok()?;
+	if pos.pos.0.is_nan() || pos.pos.1.is_nan() {
+		return None;
+	}
+
 	let now = Instant::now();
 
 	if let Ok(ex) = extrap.read() {
@@ -137,6 +157,7 @@ pub fn stop() -> Result<(), String> {
 	}
 
 	*r = false;
+	drop(r);
 
 	let Ok(mut handle) = thread_handle.lock() else {
 		return Err("wut da heeell".to_string());

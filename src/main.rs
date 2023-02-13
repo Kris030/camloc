@@ -1,6 +1,3 @@
-#![feature(array_try_map)]
-#![feature(generic_arg_infer)]
-
 pub mod service;
 pub mod calc;
 
@@ -25,9 +22,11 @@ fn main() -> Result<(), String> {
     )?;
 
     for _ in 0..6 {
-        let p = service::get_position()
-            .ok_or("Couldn't get position".to_owned())?;
-        println!("({:.2}, {:.2})", p.0, p.1);
+        if let Some(p) = service::get_position() {
+            println!("({:.2}, {:.2})", p.0, p.1);
+        } else {
+            println!("Couldn't get position");
+        }
         sleep(Duration::from_millis(100));
     }
 
