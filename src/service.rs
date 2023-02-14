@@ -1,5 +1,5 @@
 #![allow(non_upper_case_globals)]
-use std::{io::Read, thread::{spawn, JoinHandle}, sync::{RwLock, Mutex}, time::{Instant, Duration}, net::{TcpStream, ToSocketAddrs}, f64::NAN, fmt::{Debug, Display}, mem::MaybeUninit};
+use std::{io::Read, thread::{spawn, JoinHandle}, sync::{RwLock, Mutex}, time::{Instant, Duration}, net::{TcpStream, ToSocketAddrs}, f64::NAN, fmt::{Debug, Display}};
 use crate::{calc::{Coordinates, Setup}, extrapolations::Extrapolation};
 
 static running: RwLock<bool> = RwLock::new(false);
@@ -13,6 +13,8 @@ static extrap: RwLock<Option<Extrapolation>> = RwLock::new(None);
 
 type ServiceSubscriber = fn(Position) -> ();
 static subscribtions: RwLock<Vec<ServiceSubscriber>> = RwLock::new(vec![]);
+
+static start_time: RwLock<Option<Instant>> = RwLock::new(None);
 
 pub fn start<const C: usize>(
 	setup: Setup<C>,
@@ -67,6 +69,11 @@ pub fn start<const C: usize>(
 		connections.map(|c| c.unwrap())
 	};
 
+	let Ok(mut st) = start_time.write() else {
+		return Err("Couldn't start timer???".to_string());
+	};
+	*st = Some(Instant::now());
+
 	let handle = spawn(move ||
 		run(
 			setup,
@@ -95,9 +102,6 @@ fn run<const C: usize>(
 	setup: Setup<C>,
 	mut connections: [TcpStream; C],
 ) {
-
-	// FIXME: just no...
-	unsafe { START_TIME.write(Instant::now()); }
 
 	// TODO: figure out how to handle errors
 	'outer: loop {
@@ -210,10 +214,18 @@ pub struct Position {
     pub time: Instant,
 }
 
-static mut START_TIME: MaybeUninit<Instant> = MaybeUninit::uninit();
-
 impl Display for Position {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{} @ {:?}]", self.coordinates, self.time - unsafe {START_TIME.assume_init()})
+		let Ok(start) = start_time.read() else {
+			return Err(std::fmt::Error::default());
+		};
+		let Some(start) = *start else {
+			return Err(std::fmt::Error::default());
+		};
+
+        write!(f, "[{} @ {:.2?}]",
+			self.coordinates,
+			self.time - start
+		)
     }
 }
