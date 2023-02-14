@@ -1,12 +1,18 @@
 #![allow(non_upper_case_globals)]
-use std::{io::Read, thread::{spawn, JoinHandle}, sync::{RwLock, Mutex}, time::{Instant, Duration}, net::{TcpStream, ToSocketAddrs}, f64::NAN, fmt::{Debug, Display}};
-use crate::calc::{Position, Setup};
+use std::{io::Read, thread::{spawn, JoinHandle}, sync::{RwLock, Mutex}, time::{Instant, Duration}, net::{TcpStream, ToSocketAddrs}, f64::NAN, fmt::{Debug, Display}, mem::MaybeUninit};
+use crate::{calc::{Coordinates, Setup}, extrapolations::Extrapolation};
 
 static running: RwLock<bool> = RwLock::new(false);
 
 static thread_handle: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
-static last_known_pos: RwLock<KnownPosition> = RwLock::new(KnownPosition { pos: (NAN, NAN), time: unsafe { std::mem::transmute([0u8; 16]) } });
+static last_known_pos: RwLock<Position> = RwLock::new(Position {
+	time: unsafe { std::mem::transmute([0u8; 16]) },
+	coordinates: Coordinates::new(NAN, NAN),
+});
 static extrap: RwLock<Option<Extrapolation>> = RwLock::new(None);
+
+type ServiceSubscriber = fn(Position) -> ();
+static subscribtions: RwLock<Vec<ServiceSubscriber>> = RwLock::new(vec![]);
 
 pub fn start<const C: usize>(
 	setup: Setup<C>,
@@ -39,7 +45,7 @@ pub fn start<const C: usize>(
 		let mut failed = None;
 		let connections = addresses
 			.map(|a| {
-			if let Some(_) = failed {
+			if failed.is_some() {
 				return None;
 			}
 	
@@ -72,10 +78,27 @@ pub fn start<const C: usize>(
 	Ok(())
 }
 
+pub fn subscribe(action: fn(Position) -> ()) -> Result<(), String> {
+	let Ok(mut sw) = subscribtions.write() else {
+		return Err("Couldn't acquire lock for some god awful reason".to_string());
+	};
+
+	// let Ok(s) = TcpStream::connect(address) else {
+	// 	return Err("Couldn't connect to host".to_string());
+	// };
+
+	sw.push(action);
+	Ok(())
+}
+
 fn run<const C: usize>(
 	setup: Setup<C>,
 	mut connections: [TcpStream; C],
 ) {
+
+	// FIXME: just no...
+	unsafe { START_TIME.write(Instant::now()); }
+
 	// TODO: figure out how to handle errors
 	'outer: loop {
 		let Ok(r) = running.read() else {
@@ -90,7 +113,7 @@ fn run<const C: usize>(
 		for i in 0..C {
 			let mut buf = [0u8; 8];
 			
-			if let Err(_) = connections[i].read_exact(&mut buf) {
+			if connections[i].read_exact(&mut buf).is_err() {
 				break 'outer;
 			};
 
@@ -101,21 +124,30 @@ fn run<const C: usize>(
 			}
 		}
 
-		let Ok(mut posg) = last_known_pos.write() else {
+		let Some(pos) = setup.calculate_position(&pxs) else {
 			break;
 		};
 
-		if let Some(pos) = setup.calculate_position(&pxs) {
-			let position = KnownPosition { pos, time: Instant::now() };
-			*posg = position;
+		let calculated_position = Position { coordinates: pos, time: Instant::now() };
 
-			if let Ok(mut ex) = extrap.write() {
-				if let Some(ex) = ex.as_mut() {
-					ex.extrapolation_type.add_datapoint(position);
-				}
-			}
-		} else {
+		let Ok(mut global_position) = last_known_pos.write() else {
 			break;
+		};
+
+		*global_position = calculated_position;
+
+		if let Ok(mut ex) = extrap.write() {
+			if let Some(ex) = ex.as_mut() {
+				ex.extrapolator.add_datapoint(calculated_position);
+			}
+		}
+
+		let Ok(subs) = subscribtions.read() else {
+			break;
+		};
+
+		for s in subs.iter() {
+			s(calculated_position);
 		}
 	}
 }
@@ -126,7 +158,7 @@ pub fn get_position() -> Option<Position> {
 	}
 
 	let pos = *last_known_pos.read().ok()?;
-	if pos.pos.0.is_nan() || pos.pos.1.is_nan() {
+	if pos.coordinates.x.is_nan() || pos.coordinates.y.is_nan() {
 		return None;
 	}
 
@@ -138,9 +170,10 @@ pub fn get_position() -> Option<Position> {
 				return None;
 			}
 
-			Some(x.extrapolation_type.extrapolate(now))
+			x.extrapolator.extrapolate(now)
+				.map(|extrapolated| Position { coordinates: extrapolated, time: now })
 		} else {
-			Some(pos.pos)
+			Some(pos)
 		}
 	} else {
 		None
@@ -172,17 +205,15 @@ pub fn stop() -> Result<(), String> {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct KnownPosition {
-    pos: Position,
-    time: Instant,
+pub struct Position {
+    pub coordinates: Coordinates,
+    pub time: Instant,
 }
 
-pub trait Extrapolator {
-    fn add_datapoint(&mut self, position: KnownPosition);
-    fn extrapolate(&self, time: Instant) -> Position;
-}
+static mut START_TIME: MaybeUninit<Instant> = MaybeUninit::uninit();
 
-pub struct Extrapolation {
-    pub extrapolation_type: Box<dyn Extrapolator + Send + Sync>,
-    pub invalidate_after: Duration,
+impl Display for Position {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{} @ {:?}]", self.coordinates, self.time - unsafe {START_TIME.assume_init()})
+    }
 }

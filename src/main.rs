@@ -1,6 +1,9 @@
+pub mod extrapolations;
 pub mod service;
 pub mod calc;
+pub mod utils;
 
+use extrapolations::{LinearExtrapolation, Extrapolation};
 use std::{time::Duration, thread::sleep};
 use calc::{Setup, CameraInfo};
 
@@ -13,7 +16,11 @@ fn main() -> Result<(), String> {
         "localhost:12341",
     ];
 
-    let extrapolation = None;
+    let extrapolation = Some(
+        Extrapolation::new::<LinearExtrapolation>(
+            Duration::from_millis(500)
+        )
+    );
 
     service::start(
         setup,
@@ -21,9 +28,11 @@ fn main() -> Result<(), String> {
         extrapolation,
     )?;
 
+    service::subscribe(|p| eprintln!("{p}"))?;
+
     for _ in 0..6 {
         if let Some(p) = service::get_position() {
-            println!("({:.2}, {:.2})", p.0, p.1);
+            println!(" ?> {p}");
         } else {
             println!("Couldn't get position");
         }

@@ -1,6 +1,28 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
-pub type Position = (f64, f64);
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Coordinates {
+    pub x: f64,
+    pub y: f64,
+}
+
+impl Coordinates {
+    pub const fn new(x: f64, y: f64) -> Self {
+        Coordinates { x, y }
+    }
+}
+
+impl From<(f64, f64)> for Coordinates {
+    fn from((x, y): (f64, f64)) -> Self {
+        Self::new(x, y)
+    }
+}
+
+impl Display for Coordinates {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({:.2}; {:.2})", self.x, self.y)
+    }
+}
 
 /// Physical characteristics of a camera
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -21,14 +43,14 @@ impl CameraInfo {
 #[derive(Debug, PartialEq)]
 pub struct PlacedCamera {
     info: CameraInfo,
-    pos: Position,
+    pos: Coordinates,
 
     /// **IN RADIANS**
     rot: f64,
 }
 
 impl PlacedCamera {
-    pub fn new(info: CameraInfo, pos: Position, rot: f64) -> Self {
+    pub fn new(info: CameraInfo, pos: Coordinates, rot: f64) -> Self {
         Self { info, pos, rot }
     }
 }
@@ -60,7 +82,7 @@ impl<const C: usize> Setup<C> {
             .map(|c| {
                 let p = &cpos[ind % 4];
 
-                let bits = unsafe { std::mem::transmute::<f64, u64>(c.fov.0) };
+                let bits = c.fov.0.to_bits();
                 let d = match hmap.get(&bits) {
                     Some(v) => *v,
                     None => {
@@ -69,13 +91,13 @@ impl<const C: usize> Setup<C> {
                                 0.5 * c.fov.0
                             ).tan() + 1.
                         );
-                        hmap.insert(unsafe { std::mem::transmute(c.fov.0) }, v);
+                        hmap.insert(c.fov.0.to_bits(), v);
                         v
                     }
                 };
 
                 let info = c;
-                let pos = (p.0 * d, p.1 * d);
+                let pos = Coordinates::new(p.0 * d, p.1 * d);
                 let rot = (ind as f64) * 90.;
                 ind += 1;
 
@@ -90,7 +112,7 @@ impl<const C: usize> Setup<C> {
         Self { cameras }
     }
 
-    pub fn calculate_position(&self, pxs: &[Option<f64>; C]) -> Option<Position> {
+    pub fn calculate_position(&self, pxs: &[Option<f64>; C]) -> Option<Coordinates> {
         let mut tangents = [None; C];
 
         let mut lines = 0u32;
@@ -106,7 +128,7 @@ impl<const C: usize> Setup<C> {
             return None;
         }
 
-        let mut s = (0., 0.);
+        let mut s = Coordinates::new(0., 0.);
 
         for i in 0..C {
             for j in (i + 1)..C {
@@ -116,17 +138,16 @@ impl<const C: usize> Setup<C> {
                 let c1 = self.cameras[i].pos;
                 let c2 = self.cameras[j].pos;
 
-                let x = (c1.0 * atan - c2.0 * btan - c1.1 + c2.1) / (atan - btan);
+                let x = (c1.x * atan - c2.x * btan - c1.y + c2.y) / (atan - btan);
+                let y = atan * (x - c1.x) + c1.y;
 
-                let y = atan * (x - c1.0) + c1.1;
-
-                s.0 += x;
-                s.1 += y;
+                s.x += x;
+                s.y += y;
             }
         }
 
         let points = (lines * (lines - 1) / 2) as f64;
 
-        Some((s.0 / points, s.1 / points))
+        Some(Coordinates::new(s.x / points, s.y / points))
     }
 }
