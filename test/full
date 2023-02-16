@@ -1,0 +1,3 @@
+#!/bin/bash
+
+cargo r -q 2> >(java test/TestDisplay.java)
