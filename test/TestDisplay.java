@@ -11,6 +11,7 @@ import javax.swing.JFrame;
 import java.awt.Canvas;
 import java.awt.Color;
 import java.awt.Point;
+import java.awt.Font;
 
 public class TestDisplay {
 
@@ -89,12 +90,16 @@ public class TestDisplay {
 					g.fillOval(xx - 3, yy - 3, 6, 6);
 				}
 			}
+
+			g.setColor(new Color(120, 180, 0));
+			g.setFont(new Font("Comic", Font.BOLD, 40));
+			g.drawString(Integer.toString(points.size()), w - 150, h - 20);
 			
 			g.dispose();
 			bs.show();
 
 			try {
-				Thread.sleep(100);
+				Thread.sleep(15);
 			} catch (InterruptedException e) {
 				e.printStackTrace();
 			}

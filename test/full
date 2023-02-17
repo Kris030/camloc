@@ -1,3 +1,4 @@
 #!/bin/bash
-
-cargo r -q 2> >(java test/TestDisplay.java)
+cargo build &&
+exec 3> >(java test/TestDisplay.java) &&
+./target/debug/camloc 2>&3

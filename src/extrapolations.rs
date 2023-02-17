@@ -3,6 +3,7 @@ use std::time::{Instant, Duration};
 
 pub trait Extrapolator: Send + Sync {
     fn add_datapoint(&mut self, position: Position);
+	fn get_last_datapoint(&self) -> Option<Position>;
     fn extrapolate(&self, time: Instant) -> Option<Coordinates>;
 }
 
@@ -56,5 +57,9 @@ impl Extrapolator for LinearExtrapolation {
 		let t = td.as_secs_f64() / tmax.as_secs_f64();
 
 		Some(Coordinates::lerp(&d1.coordinates, &d2.coordinates, t))
+    }
+
+    fn get_last_datapoint(&self) -> Option<Position> {
+        self.data[self.p]
     }
 }

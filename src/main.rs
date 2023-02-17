@@ -1,7 +1,7 @@
 pub mod extrapolations;
 pub mod service;
-pub mod calc;
 pub mod utils;
+pub mod calc;
 
 use extrapolations::{LinearExtrapolation, Extrapolation};
 use std::{time::Duration, thread::sleep};
@@ -16,7 +16,7 @@ fn main() -> Result<(), String> {
         "localhost:12341",
     ];
 
-    let _extrapolation = Some(
+    let extrapolation = Some(
         Extrapolation::new::<LinearExtrapolation>(
             Duration::from_millis(500)
         )
@@ -25,11 +25,13 @@ fn main() -> Result<(), String> {
     service::start(
         setup,
         addresses,
-        None, // extrapolation,
+        extrapolation,
     )?;
 
     let write_to_stderr_binary = |p: service::Position| {
         use std::io::{stderr, Write};
+
+        println!("{p}");
 
         let buf = [
             p.coordinates.x.to_be_bytes(),
@@ -42,15 +44,21 @@ fn main() -> Result<(), String> {
             .expect("Couldn't write coords to stderr???");
     };
 
-    // service::subscribe(write_to_stderr_binary)?;
-
-    for _ in 0..16 {
-        if let Some(p) = service::get_position() {
-            write_to_stderr_binary(p);
-        } else {
-            println!("Couldn't get position");
+    if false {
+        service::subscribe(write_to_stderr_binary)?;
+        sleep(Duration::from_secs(15));
+    } else {
+        let mut missing_positions = 0;
+        while missing_positions < 100 {
+            if let Some(p) = service::get_position() {
+                write_to_stderr_binary(p);
+                missing_positions = 0;
+            } else {
+                println!("Couldn't get position");
+                missing_positions += 1;
+            }
+            sleep(Duration::from_millis(10));
         }
-        sleep(Duration::from_millis(30));
     }
 
     println!("Exiting test...");

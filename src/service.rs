@@ -8,6 +8,7 @@ static thread_handle: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 static last_known_pos: RwLock<Position> = RwLock::new(Position {
 	time: unsafe { std::mem::transmute([0u8; 16]) },
 	coordinates: Coordinates::new(NAN, NAN),
+	interpolated: None,
 });
 static extrap: RwLock<Option<Extrapolation>> = RwLock::new(None);
 
@@ -21,22 +22,23 @@ pub fn start<const C: usize>(
 	addresses: [impl ToSocketAddrs + Display; C],
 	extrapolation: Option<Extrapolation>,
 ) -> Result<(), String> {
-	let mut r = running.write().map_err(|_| "".to_owned())?;
-	if *r {
-		return Err("Already running".to_owned());
+	{
+		let mut r = running.write().map_err(|_| "".to_owned())?;
+		if *r {
+			return Err("Already running".to_owned());
+		}
+		*r = true;
 	}
-	*r = true;
-	drop(r);
+	{
+		let Ok(mut ex) = extrap.write() else {
+			return Err("xdd".to_string());	
+		};
+		*ex = extrapolation;
+	}
 
 	let Ok(mut hg) = thread_handle.lock() else {
 		return Err("wut da heell".to_string());
 	};
-
-	let Ok(mut ex) = extrap.write() else {
-		return Err("xdd".to_string());	
-	};
-	*ex = extrapolation;
-	drop(ex);
 
 	// let connections = addresses.try_map(|a|
 	// 	TcpStream::connect(a)
@@ -132,7 +134,11 @@ fn run<const C: usize>(
 			break;
 		};
 
-		let calculated_position = Position { coordinates: pos, time: Instant::now() };
+		let calculated_position = Position {
+			coordinates: pos,
+			time: Instant::now(),
+			interpolated: None,
+		};
 
 		let Ok(mut global_position) = last_known_pos.write() else {
 			break;
@@ -175,7 +181,14 @@ pub fn get_position() -> Option<Position> {
 			}
 
 			x.extrapolator.extrapolate(now)
-				.map(|extrapolated| Position { coordinates: extrapolated, time: now })
+				.map(|extrapolated| Position {
+					coordinates:
+					extrapolated,
+					time: now,
+					interpolated: x.extrapolator
+						.get_last_datapoint()
+						.map(|p| now - p.time),
+				})
 		} else {
 			Some(pos)
 		}
@@ -212,6 +225,10 @@ pub fn stop() -> Result<(), String> {
 pub struct Position {
     pub coordinates: Coordinates,
     pub time: Instant,
+
+	/// - None - not interpolated
+	/// - Some(d) - interpolated by d time
+	pub interpolated: Option<Duration>,
 }
 
 impl Display for Position {
@@ -223,9 +240,13 @@ impl Display for Position {
 			return Err(std::fmt::Error::default());
 		};
 
-        write!(f, "[{} @ {:.2?}]",
-			self.coordinates,
-			self.time - start
-		)
+		let coords = &self.coordinates;
+		let t = self.time - start;
+
+		if let Some(from) = self.interpolated {
+			write!(f, "[{coords} @ {from:.2?} -> {t:.2?}]")
+		} else {
+			write!(f, "[{coords} @ {t:.2?}]")
+		}
     }
 }
