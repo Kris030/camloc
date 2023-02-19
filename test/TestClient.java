@@ -7,9 +7,8 @@ import java.util.ArrayList;
 import java.util.Random;
 import java.net.Socket;
 
-import java.awt.Point;
-
 class Main {
+	public record Vector2(double x, double y) {}
 
 	static double clamp(double value, double min, double max) {
 		if (value >= max)
@@ -19,7 +18,7 @@ class Main {
 		return value;
 	}
 
-	static Point.Double getPoss(Point.Double p, double square_size, double fov) {
+	static Vector2 getPoss(Vector2 p, double square_size, double fov) {
 		double cd = getCamDistance(square_size, fov);
 
 		double m1 = Math.atan2(p.y, p.x + cd);
@@ -28,27 +27,27 @@ class Main {
 		double m2 = Math.atan(p.x / (p.y - cd));
 		double x2 = 1 - (m2 + fov / 2) / fov;
 
-		return new Point.Double(x1, x2);
+		return new Vector2(x1, x2);
 	}
 
 	static enum PositionGenerator {
 
 		SQRT {
-			Point.Double[] genPoints() {
-				Point.Double[] ps = new Point.Double[7];
+			Vector2[] genPoints() {
+				Vector2[] ps = new Vector2[7];
 				int a = 1;
 				for (int i = 0; i < 7 * a; i++) {
 					double x = 0.2 / a * i;
 					double y = Math.sqrt(x) / 3;
-					ps[i] = getPoss(new Point.Double(x, y), 3, Math.toRadians(62.2));
+					ps[i] = getPoss(new Vector2(x, y), 3, Math.toRadians(62.2));
 				}
 
 				return ps;
 			}
 		}, WANDER {
-			Point.Double[] genPoints() {
+			Vector2[] genPoints() {
 				Random r = new Random();
-				Point.Double[] ps = new Point.Double[500];
+				Vector2[] ps = new Vector2[500];
 
 				double angle = r.nextDouble(Math.PI * 2);
 				double step = .05, turn_factor = Math.toRadians(20);
@@ -71,7 +70,7 @@ class Main {
 					y += Math.sin(angle) * step;
 
 					// System.out.printf("#%d. (%.2f, %.2f); %f %b\n", i, x, y, Math.toDegrees(angle) % 360, b);
-					ps[i] = getPoss(new Point.Double(x, y), 3, Math.toRadians(62.2));
+					ps[i] = getPoss(new Vector2(x, y), 3, Math.toRadians(62.2));
 				}
 
 				return ps;
@@ -80,18 +79,18 @@ class Main {
 
 		;
 
-		abstract Point.Double[] genPoints();
+		abstract Vector2[] genPoints();
 	}
 
-	static Point.Double[] getPositionsFromFile() throws FileNotFoundException {
-		ArrayList<Point.Double> l = new ArrayList<Point.Double>();
+	static Vector2[] getPositionsFromFile() throws FileNotFoundException {
+		ArrayList<Vector2> l = new ArrayList<Vector2>();
 		try (DataInputStream dis = new DataInputStream(new FileInputStream("dump"))) {
 			while (true) {
 				double x1 = dis.readDouble(), x2 = dis.readDouble();
-				l.add(new Point.Double(x1, x2));
+				l.add(new Vector2(x1, x2));
 			}
 		} catch (Exception e) {}
-		return l.toArray(new Point.Double[l.size()]);
+		return l.toArray(new Vector2[l.size()]);
 	}
 
 	static double getCamDistance(double square_size, double fov) {
@@ -107,7 +106,7 @@ class Main {
 		int port = 12340 + me;
 		System.err.println("Running as " + me + " on port " + port);
 
-		Point.Double[] positions = PositionGenerator.WANDER.genPoints();
+		Vector2[] positions = PositionGenerator.WANDER.genPoints();
 
 		try (ServerSocket ss = new ServerSocket(port)) {
 			ss.setSoTimeout(0);
