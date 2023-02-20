@@ -22,22 +22,52 @@ impl<const C: usize> Drop for LocationServiceHandle<C> {
     fn drop(&mut self) {
 		let handle = std::mem::replace(&mut self.handle, None)
 			.expect("Handle should always be Some");
-		
+
 		let r = self.service.running.write();
-		
 		tokio::task::block_in_place(|| {
 			tokio::runtime::Handle::current().block_on(async {
 				let mut r = r.await;
 				*r = false;
-
+				drop(r);
 				handle.await
 			})
 		}).expect("Should always be able join the task");
-		// TODO: wait for joinhandle
-    }
+	}
 }
 
 impl<const C: usize> LocationService<C> {
+	// TODO: scanning
+	// pub async fn start_scanning(
+	// 	setup: Setup,
+	// 	address_template: &str,
+	// 	port: u16,
+	// 	extrapolation: Option<Extrapolation>,
+	// ) -> Result<LocationServiceHandle, String> {
+	// 	use tokio::time::sleep;
+
+	// 	let parts: Vec<&str> = address_template.split('x').collect();
+
+	// 	async fn sweep(parts: &Vec<&str>) {
+	// 		let progess = vec![0u8; parts.len()];
+
+	// 		loop {
+
+	// 			sleep(Duration::from_millis(25)).await;
+	// 		}
+	// 	}
+
+	// 	sweep(&parts).await;
+
+	// 	spawn(async {
+	// 		loop {
+	// 			sweep(&parts).await;
+	// 			sleep(Duration::from_millis(500)).await;
+	// 		}
+	// 	});
+
+	// 	Ok(())
+	// }
+
 	pub async fn start(
 		setup: Setup<C>,
 		addresses: [impl ToSocketAddrs + Copy + Send + 'static; C],
