@@ -51,7 +51,7 @@ class Main {
 
 				double angle = r.nextDouble(Math.PI * 2);
 				double step = .05, turn_factor = Math.toRadians(20);
-				double x = 0, y = 0;
+				double x = r.nextDouble(-1, 1), y = r.nextDouble(-1, 1);
 				
 				double square_size = 3, threshold = .5;
 
@@ -123,7 +123,7 @@ class Main {
 				else
 					throw new Exception("bruh");
 		
-				System.err.println("Sending pos #" + i + " | " + d);
+				System.err.printf("Sending pos #%d | %.3f\n", i, d);
 				dos.writeDouble(d);
 				Thread.sleep(500);
 			}
