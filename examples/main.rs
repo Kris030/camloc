@@ -1,20 +1,15 @@
-pub mod extrapolations;
-pub mod service;
-pub mod utils;
-pub mod calc;
-
-use extrapolations::{LinearExtrapolation, Extrapolation};
-use service::{LocationService, Position};
-use calc::{Setup, CameraInfo};
+use camloc::extrapolations::{LinearExtrapolation, Extrapolation};
+use camloc::service::{LocationService, Position};
+use camloc::calc::{Setup, CameraInfo};
 use std::time::Duration;
 use tokio::time::sleep;
 
 #[tokio::main]
 async fn main() -> Result<(), String> {
     let picamera = CameraInfo::new((62.2, 48.8));
-    let setup = Setup::new_square(3., [picamera; 2]);
+    let setup = Setup::new_square(3., vec![picamera; 2]);
 
-    let addresses = [
+    let addresses = &[
         "localhost:12340",
         "localhost:12341",
     ];
@@ -46,9 +41,7 @@ async fn main() -> Result<(), String> {
 
     if false {
         locations_service.subscribe(|p| {
-            tokio::spawn(async move {
-                write_to_stderr_binary(p).await;
-            });
+            tokio::spawn(write_to_stderr_binary(p));
         }).await?;
         sleep(Duration::from_secs(15)).await
     } else {

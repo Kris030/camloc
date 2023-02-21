@@ -1,24 +1,26 @@
 #![allow(non_upper_case_globals)]
-use tokio::{net::{TcpStream, ToSocketAddrs}, spawn, task::{JoinSet, JoinHandle}, io::AsyncReadExt, sync::RwLock};
+use tokio::{net::{TcpStream, ToSocketAddrs}, spawn, task::{JoinSet, JoinHandle}, sync::{RwLock, Mutex}, io::AsyncReadExt};
 use std::{sync::Arc, time::{Instant, Duration}, f64::NAN, fmt::{Debug, Display}};
 
 use crate::{calc::{Coordinates, Setup}, extrapolations::Extrapolation};
 
 type ServiceSubscriber = fn(Position) -> ();
-pub struct LocationService<const C: usize> {
+pub struct LocationService {
 	running: RwLock<bool>,
 	last_known_pos: RwLock<Position>,
 	extrap: RwLock<Option<Extrapolation>>,
 	subscribtions: RwLock<Vec<ServiceSubscriber>>,
 	start_time: RwLock<Instant>,
+	setup: RwLock<Setup>,
+	connections: Mutex<Vec<TcpStream>>,
 }
 
-pub struct LocationServiceHandle<const C: usize> {
+pub struct LocationServiceHandle {
 	handle: Option<JoinHandle<()>>,
-	service: Arc<LocationService<C>>,
+	service: Arc<LocationService>,
 }
 
-impl<const C: usize> Drop for LocationServiceHandle<C> {
+impl Drop for LocationServiceHandle {
     fn drop(&mut self) {
 		let handle = std::mem::replace(&mut self.handle, None)
 			.expect("Handle should always be Some");
@@ -35,47 +37,19 @@ impl<const C: usize> Drop for LocationServiceHandle<C> {
 	}
 }
 
-impl<const C: usize> LocationService<C> {
+impl LocationService {
 	// TODO: scanning
-	// pub async fn start_scanning(
-	// 	setup: Setup,
-	// 	address_template: &str,
-	// 	port: u16,
-	// 	extrapolation: Option<Extrapolation>,
-	// ) -> Result<LocationServiceHandle, String> {
-	// 	use tokio::time::sleep;
-
-	// 	let parts: Vec<&str> = address_template.split('x').collect();
-
-	// 	async fn sweep(parts: &Vec<&str>) {
-	// 		let progess = vec![0u8; parts.len()];
-
-	// 		loop {
-
-	// 			sleep(Duration::from_millis(25)).await;
-	// 		}
-	// 	}
-
-	// 	sweep(&parts).await;
-
-	// 	spawn(async {
-	// 		loop {
-	// 			sweep(&parts).await;
-	// 			sleep(Duration::from_millis(500)).await;
-	// 		}
-	// 	});
-
-	// 	Ok(())
-	// }
-
-	pub async fn start(
-		setup: Setup<C>,
-		addresses: [impl ToSocketAddrs + Copy + Send + 'static; C],
+	pub async fn start_scanning(
+		setup: Setup,
+		address_generator: impl IntoIterator<Item = impl ToSocketAddrs + Copy + std::marker::Send + std::marker::Sync + Send + Sync> + Copy + std::marker::Send + std::marker::Sync + Send + Sync,
 		extrapolation: Option<Extrapolation>,
-	) -> Result<LocationServiceHandle<C>, String> {
-		let connections = async {
+	) -> Result<LocationServiceHandle, String> {
+		use tokio::time::sleep;
+
+		let start_time = Instant::now();
+		let initial_connections: Vec<TcpStream> = async {
 			let mut js = JoinSet::new();
-			for a in addresses {
+			for a in address_generator.into_iter() {
 				js.spawn(TcpStream::connect(a));
 			}
 
@@ -89,7 +63,78 @@ impl<const C: usize> LocationService<C> {
 
 			Ok(cons)
 		}.await?;
-	
+
+		let instance = LocationService {
+			running: RwLock::new(true),
+			last_known_pos: RwLock::new(Position {
+				start_time: unsafe { std::mem::transmute([0u8; 16]) },
+				time: unsafe { std::mem::transmute([0u8; 16]) },
+				coordinates: Coordinates::new(NAN, NAN),
+				interpolated: None,
+			}),
+			extrap: RwLock::new(extrapolation),
+			subscribtions: RwLock::new(vec![]),
+			start_time: RwLock::new(start_time),
+			connections: Mutex::new(initial_connections),
+			setup: RwLock::new(setup),
+		};
+
+		let arc = Arc::new(instance);
+		let ret = arc.clone();
+		let sweep_handle = arc.clone();
+
+		let handle = spawn(
+			Self::run(
+				arc,
+				start_time,
+			)
+		);
+
+		spawn(async move {
+			let address_generator = address_generator.clone();
+			loop {
+				let gen = address_generator.clone();
+				for mut a in gen.into_iter() {
+					if let Ok(new_connection) = TcpStream::connect(a).await {
+						// TODO: add camera info to setup
+						let mut conn_handle = sweep_handle.connections.lock().await;
+						conn_handle.push(new_connection);
+						drop(conn_handle);
+					}
+					sleep(Duration::from_millis(50)).await;
+				}
+				sleep(Duration::from_millis(500)).await;
+			}
+		});
+
+		Ok(LocationServiceHandle {
+			handle: Some(handle),
+			service: ret,
+		})
+	}
+
+	pub async fn start(
+		setup: Setup,
+		addresses: &[impl ToSocketAddrs + Copy + Send + 'static],
+		extrapolation: Option<Extrapolation>,
+	) -> Result<LocationServiceHandle, String> {
+		let connections = async {
+			let mut js = JoinSet::new();
+			for a in addresses {
+				js.spawn(TcpStream::connect(*a));
+			}
+
+			let mut cons = vec![];
+			while let Some(v) = js.join_next().await {
+				match v {
+					Ok(Ok(s)) => cons.push(s),
+					_ => return Err("Couldn't connect to all hosts".to_string()),
+				}
+			}
+
+			Ok(cons)
+		}.await?;
+
 		let start_time = Instant::now();
 	
 		let instance = LocationService {
@@ -103,6 +148,8 @@ impl<const C: usize> LocationService<C> {
 			extrap: RwLock::new(extrapolation),
 			subscribtions: RwLock::new(vec![]),
 			start_time: RwLock::new(start_time),
+			connections: Mutex::new(connections),
+			setup: RwLock::new(setup),
 		};
 
 		let arc = Arc::new(instance);
@@ -111,8 +158,6 @@ impl<const C: usize> LocationService<C> {
 		let handle = spawn(
 			Self::run(
 				arc,
-				setup,
-				connections,
 				start_time,
 			)
 		);
@@ -124,12 +169,10 @@ impl<const C: usize> LocationService<C> {
 	}
 
 	async fn run(
-		self: Arc<LocationService<C>>,
-		setup: Setup<C>,
-		mut connections: Vec<TcpStream>,
+		self: Arc<LocationService>,
 		start_time: Instant,
 	) {
-	
+
 		// TODO: figure out how to handle errors
 		'outer: loop {
 			let r = self.running.read().await;
@@ -151,11 +194,10 @@ impl<const C: usize> LocationService<C> {
 			// let mut js = JoinSet::new();
 			// for t in tasks {
 			// 	js.spawn(t);
-			// }
 
-			let mut pxs = [None; C];
+			let mut pxs = vec![None; self.setup.write().await.cameras.len()];
 			{
-				for (i, c) in connections.iter_mut().enumerate() {
+				for (i, c) in self.connections.lock().await.iter_mut().enumerate() {
 					// 	use tokio::io::AsyncReadExt;
 					let mut buf = [0u8; 8];
 					if c.read_exact(&mut buf).await.is_err() {
@@ -166,7 +208,7 @@ impl<const C: usize> LocationService<C> {
 				}
 			}
 
-			let Some(pos) = setup.calculate_position(&pxs) else {
+			let Some(pos) = self.setup.read().await.calculate_position(pxs) else {
 				break;
 			};
 	
@@ -196,7 +238,7 @@ impl<const C: usize> LocationService<C> {
 
 }
 
-impl<const C: usize> LocationServiceHandle<C> {
+impl LocationServiceHandle {
 
 	pub async fn subscribe(&self, action: fn(Position) -> ()) -> Result<(), String> {
 		let mut sw = self.service.subscribtions.write().await;

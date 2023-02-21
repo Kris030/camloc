@@ -55,18 +55,19 @@ impl PlacedCamera {
     }
 }
 
-pub struct Setup<const C: usize> {
-    cameras: [PlacedCamera; C],
+pub struct Setup {
+    pub(crate) cameras: Vec<PlacedCamera>,
 }
 
-impl<const C: usize> Setup<C> {
-	pub fn new_freehand(cameras: [PlacedCamera; C]) -> Self {
+impl Setup {
+	pub fn new_freehand(cameras: Vec<PlacedCamera>) -> Self {
 		Self { cameras }
 	}
 
-    pub fn new_square(square_size: f64, cameras: [CameraInfo; C]) -> Self {
+    pub fn new_square(square_size: f64, cameras: Vec<CameraInfo>) -> Self {
+        let c = cameras.len();
         debug_assert!(
-            2 <= C && C <= 4,
+            (2..=4).contains(&c),
             "A square setup may only have 2 or 4 cameras"
         );
 
@@ -79,6 +80,7 @@ impl<const C: usize> Setup<C> {
         ];
         let mut ind = 0;
         let cameras = cameras
+            .into_iter()
             .map(|c| {
                 let p = &cpos[ind % 4];
 
@@ -107,16 +109,19 @@ impl<const C: usize> Setup<C> {
                     rot.to_radians()
                 )
             }
-        );
+        ).collect();
 
         Self { cameras }
     }
 
-    pub fn calculate_position(&self, pxs: &[Option<f64>; C]) -> Option<Coordinates> {
-        let mut tangents = [None; C];
+    pub fn calculate_position(&self, pxs: Vec<Option<f64>>) -> Option<Coordinates> {
+        let c = self.cameras.len();
+        debug_assert_eq!(c, pxs.len());
+
+        let mut tangents = vec![None; c];
 
         let mut lines = 0u32;
-        for i in 0..C {
+        for i in 0..c {
             if let Some(x) = pxs[i] {
                 tangents[i] = Some(
                     (self.cameras[i].rot + (self.cameras[i].info.fov.0 * (0.5 - x))).tan()
@@ -130,8 +135,8 @@ impl<const C: usize> Setup<C> {
 
         let mut s = Coordinates::new(0., 0.);
 
-        for i in 0..C {
-            for j in (i + 1)..C {
+        for i in 0..c {
+            for j in (i + 1)..c {
                 let Some(atan) = tangents[i] else { continue; };
                 let Some(btan) = tangents[j] else { continue; };
 
@@ -149,5 +154,9 @@ impl<const C: usize> Setup<C> {
         let points = (lines * (lines - 1) / 2) as f64;
 
         Some(Coordinates::new(s.x / points, s.y / points))
+    }
+
+    pub fn add_cameras(mut self, mut new_cameras: Vec<PlacedCamera>) {
+        self.cameras.append(&mut new_cameras);
     }
 }
