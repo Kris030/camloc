@@ -1,4 +1,5 @@
 use camloc::extrapolations::{LinearExtrapolation, Extrapolation};
+use camloc::scanning::{AddressTemplate, TemplateMember::*};
 use camloc::service::{LocationService, Position};
 use camloc::calc::{Setup, CameraInfo};
 use std::time::Duration;
@@ -9,10 +10,10 @@ async fn main() -> Result<(), String> {
     let picamera = CameraInfo::new((62.2, 48.8));
     let setup = Setup::new_square(3., vec![picamera; 2]);
 
-    let addresses = [
-        "localhost:12340",
-        "localhost:12341",
-    ].map(String::from);
+    let addresses = AddressTemplate::new(
+        [Fixed(127), Fixed(0), Fixed(0), Fixed(1)],
+        Templated(12340..12342)
+    );
 
     let extrapolation = Some(
         Extrapolation::new::<LinearExtrapolation>(
@@ -20,7 +21,7 @@ async fn main() -> Result<(), String> {
         )
     );
 
-    let locations_service = LocationService::start(
+    let locations_service = LocationService::start_scanning(
         setup,
         addresses,
         extrapolation,

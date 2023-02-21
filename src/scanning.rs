@@ -1,17 +1,21 @@
 use std::ops::Range;
 
 #[derive(Debug, Clone)]
-pub enum TemplateMember {
-    Templated(Range<u8>),
-    Fixed(u8),
+pub enum TemplateMember<T> {
+    Templated(Range<T>),
+    Fixed(T),
 }
 
+#[derive(Debug, Clone)]
 pub struct AddressTemplate {
-    template: [TemplateMember; 4],
+    template: [TemplateMember<u8>; 4],
+    port: TemplateMember<u16>,
 }
 // TODO: proc macro to create from string
 impl AddressTemplate {
-    pub fn new(template: [TemplateMember; 4]) -> Self { Self { template } }
+    pub fn new(template: [TemplateMember<u8>; 4], port: TemplateMember<u16>) -> Self {
+		Self { template, port }
+	}
 }
 
 impl IntoIterator for &AddressTemplate {
@@ -37,12 +41,18 @@ impl IntoIterator for &AddressTemplate {
 			TemplateMember::Fixed(f) => vec![*f],
 			TemplateMember::Templated(r) => r.clone().collect(),
 		};
+		let ports: Vec<u16> = match &self.port {
+			TemplateMember::Fixed(f) => vec![*f],
+			TemplateMember::Templated(r) => r.clone().collect(),
+		};
 
 		for b1 in &iter0 {
 			for b2 in &iter1 {
 				for b3 in &iter2 {
 					for b4 in &iter3 {
-						res.push(format!("{}.{}.{}.{}", b1, b2, b3, b4));
+						for p in &ports {
+							res.push(format!("{b1}.{b2}.{b3}.{b4}:{p}"));
+						}
 					}
 				}
 			}

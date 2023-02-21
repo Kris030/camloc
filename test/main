@@ -1,0 +1,4 @@
+#!/bin/bash
+cargo build --example main &&
+exec 3> >(java test/TestDisplay.java) &&
+./target/debug/examples/main 2>&3

@@ -1,8 +1,8 @@
 #![allow(non_upper_case_globals)]
-use tokio::{net::{TcpStream, ToSocketAddrs}, spawn, task::{JoinSet, JoinHandle}, sync::{RwLock, Mutex}, io::AsyncReadExt};
+use tokio::{net::TcpStream, spawn, task::{JoinSet, JoinHandle}, sync::{RwLock, Mutex}, io::AsyncReadExt};
 use std::{sync::Arc, time::{Instant, Duration}, f64::NAN, fmt::{Debug, Display}};
 
-use crate::{calc::{Coordinates, Setup}, extrapolations::Extrapolation};
+use crate::{calc::{Coordinates, Setup}, extrapolations::Extrapolation, scanning::AddressTemplate};
 
 type ServiceSubscriber = fn(Position) -> ();
 pub struct LocationService {
@@ -12,7 +12,7 @@ pub struct LocationService {
 	subscribtions: RwLock<Vec<ServiceSubscriber>>,
 	start_time: RwLock<Instant>,
 	setup: RwLock<Setup>,
-	connections: Mutex<Vec<TcpStream>>,
+	connections: Mutex<Vec<(String, TcpStream)>>,
 }
 
 pub struct LocationServiceHandle {
@@ -38,27 +38,49 @@ impl Drop for LocationServiceHandle {
 }
 
 impl LocationService {
+	/*	pub async fn start_scanning<S, I, G>(
+		setup: Setup,
+		address_generator: G,
+		extrapolation: Option<Extrapolation>,
+	) -> Result<LocationServiceHandle, String>
+	where
+		S: ToSocketAddrs + Copy + Send + Sync + 'static,
+		I: Iterator<Item = S> + Copy + Send + Sync,
+		G: IntoIterator<
+			Item = S,
+			IntoIter = I,
+		> + Copy + Send + Sync + 'static { */
 	// TODO: scanning
 	pub async fn start_scanning(
 		setup: Setup,
-		address_generator: impl IntoIterator<Item = impl ToSocketAddrs + Copy + std::marker::Send + std::marker::Sync + Send + Sync> + Copy + std::marker::Send + std::marker::Sync + Send + Sync,
+		address_generator: AddressTemplate,
 		extrapolation: Option<Extrapolation>,
 	) -> Result<LocationServiceHandle, String> {
 		use tokio::time::sleep;
 
 		let start_time = Instant::now();
-		let initial_connections: Vec<TcpStream> = async {
+		let initial_connections: Vec<(String, TcpStream)> = async {
 			let mut js = JoinSet::new();
 			for a in address_generator.into_iter() {
-				js.spawn(TcpStream::connect(a));
+				js.spawn(async move {
+					if let Ok(c) = TcpStream::connect(&a).await {
+						Some((a, c))
+					} else {
+						None
+					}
+				});
 			}
 
 			let mut cons = vec![];
 			while let Some(v) = js.join_next().await {
-				match v {
-					Ok(Ok(s)) => cons.push(s),
-					_ => return Err("Couldn't connect to all hosts".to_string()),
-				}
+				let Ok(v) = v else {
+					return Err("Connect task?? failed???".to_string())
+				};
+				let Some(v) = v else {
+					return Err("Failed to connect to to one of the hosts".to_string())
+				};
+
+				cons.push(v);
 			}
 
 			Ok(cons)
@@ -91,16 +113,23 @@ impl LocationService {
 		);
 
 		spawn(async move {
-			let address_generator = address_generator.clone();
 			loop {
-				let gen = address_generator.clone();
-				for mut a in gen.into_iter() {
-					if let Ok(new_connection) = TcpStream::connect(a).await {
-						// TODO: add camera info to setup
-						let mut conn_handle = sweep_handle.connections.lock().await;
-						conn_handle.push(new_connection);
-						drop(conn_handle);
+				let r = sweep_handle.running.read().await;
+				if !*r { break; }
+				drop(r);
+
+				for a in address_generator.into_iter() {
+					let mut conn_handle = sweep_handle.connections.lock().await;
+					if conn_handle.iter().any(|(addr, _)| *addr == a) {
+						continue;
 					}
+
+					if let Ok(new_connection) = TcpStream::connect(&a).await {
+						// TODO: add camera info to setup
+						conn_handle.push((a, new_connection));
+					}
+					drop(conn_handle);
+
 					sleep(Duration::from_millis(50)).await;
 				}
 				sleep(Duration::from_millis(500)).await;
@@ -115,19 +144,25 @@ impl LocationService {
 
 	pub async fn start(
 		setup: Setup,
-		addresses: &[impl ToSocketAddrs + Copy + Send + 'static],
+		addresses: impl IntoIterator<Item = String>,
 		extrapolation: Option<Extrapolation>,
 	) -> Result<LocationServiceHandle, String> {
 		let connections = async {
 			let mut js = JoinSet::new();
 			for a in addresses {
-				js.spawn(TcpStream::connect(*a));
+				js.spawn(async {
+					if let Ok(s) = TcpStream::connect(&a).await {
+						Some((a, s))
+					} else {
+						None
+					}
+				});
 			}
 
 			let mut cons = vec![];
 			while let Some(v) = js.join_next().await {
 				match v {
-					Ok(Ok(s)) => cons.push(s),
+					Ok(Some(v)) => cons.push(v),
 					_ => return Err("Couldn't connect to all hosts".to_string()),
 				}
 			}
@@ -181,47 +216,30 @@ impl LocationService {
 			}
 			drop(r);
 
-			// let tasks: Vec<_> = connections.iter_mut().map(|c| async {
-			// 	use tokio::io::AsyncReadExt;
-			// 	let mut buf = [0u8; 8];
-			// 	if c.read_exact(&mut buf).await.is_ok() {
-			// 		Some(buf)
-			// 	} else {
-			// 		None
-			// 	}
-			// }).collect();
-			
-			// let mut js = JoinSet::new();
-			// for t in tasks {
-			// 	js.spawn(t);
-
 			let mut pxs = vec![None; self.setup.write().await.cameras.len()];
-			{
-				for (i, c) in self.connections.lock().await.iter_mut().enumerate() {
-					// 	use tokio::io::AsyncReadExt;
-					let mut buf = [0u8; 8];
-					if c.read_exact(&mut buf).await.is_err() {
-						break 'outer;
-					}
-
-					pxs[i] = Some(f64::from_be_bytes(buf));
+			for (i, c) in self.connections.lock().await.iter_mut().enumerate() {
+				let mut buf = [0u8; 8];
+				if c.1.read_exact(&mut buf).await.is_err() {
+					break 'outer;
 				}
+
+				pxs[i] = Some(f64::from_be_bytes(buf));
 			}
 
 			let Some(pos) = self.setup.read().await.calculate_position(pxs) else {
 				break;
 			};
-	
+
 			let calculated_position = Position {
 				coordinates: pos,
 				start_time,
 				time: Instant::now(),
 				interpolated: None,
 			};
-	
+
 			let mut global_position = self.last_known_pos.write().await;
 			*global_position = calculated_position;
-	
+
 			let mut ex = self.extrap.write().await;
 			let Some(ref mut ex) = *ex else {
 				break;
