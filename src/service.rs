@@ -38,19 +38,6 @@ impl Drop for LocationServiceHandle {
 }
 
 impl LocationService {
-	/*	pub async fn start_scanning<S, I, G>(
-		setup: Setup,
-		address_generator: G,
-		extrapolation: Option<Extrapolation>,
-	) -> Result<LocationServiceHandle, String>
-	where
-		S: ToSocketAddrs + Copy + Send + Sync + 'static,
-		I: Iterator<Item = S> + Copy + Send + Sync,
-		G: IntoIterator<
-			Item = S,
-			IntoIter = I,
-		> + Copy + Send + Sync + 'static { */
-	// TODO: scanning
 	pub async fn start_scanning(
 		setup: Setup,
 		address_generator: AddressTemplate,
@@ -125,7 +112,7 @@ impl LocationService {
 					}
 
 					if let Ok(new_connection) = TcpStream::connect(&a).await {
-						// TODO: add camera info to setup
+						// FIXME: add camera info to setup
 						conn_handle.push((a, new_connection));
 					}
 					drop(conn_handle);
@@ -208,7 +195,7 @@ impl LocationService {
 		start_time: Instant,
 	) {
 
-		// TODO: figure out how to handle errors
+		// FIXME: figure out how to handle errors
 		'outer: loop {
 			let r = self.running.read().await;
 			if !*r {
@@ -297,30 +284,6 @@ impl LocationServiceHandle {
 			Some(*pos)
 		}
 	}
-
-	// pub fn stop(self) -> Result<(), String> {
-	// 	let Ok(mut r) = self.running.write() else {
-	// 		return Err("wut da heeell".to_string());
-	// 	};
-	
-	// 	if !*r {
-	// 		return Err("Not running".to_string());
-	// 	}
-	
-	// 	*r = false;
-	// 	drop(r);
-	
-	// 	let Ok(mut handle) = self.thread_handle.lock() else {
-	// 		return Err("wut da heeell".to_string());
-	// 	};
-	// 	let h = std::mem::replace(&mut *handle, None);
-	// 	if let Some(h) = h {
-	// 		h.join().await.map_err(|_| "Couldn't join??".to_string())?;
-	// 		Ok(())
-	// 	} else {
-	// 		Err("No handle?".to_string())
-	// 	}
-	// }
 }
 
 #[derive(Debug, Clone, Copy)]
