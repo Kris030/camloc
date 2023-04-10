@@ -1,4 +1,4 @@
-use crate::util;
+use crate::util::{self, Color};
 use opencv::{core, objdetect, prelude::*, types};
 
 pub struct Aruco {
@@ -12,7 +12,7 @@ pub struct Aruco {
 impl Aruco {
     /// setup new aruco detector
     /// generate targets with: https://chev.me/arucogen/
-    pub fn new(aruco_target: i32) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(aruco_target: i32) -> opencv::Result<Self> {
         Ok(Self {
             detector: objdetect::ArucoDetector::new(
                 &objdetect::get_predefined_dictionary(
@@ -32,7 +32,12 @@ impl Aruco {
         })
     }
 
-    pub fn detect(&mut self, frame: &mut Mat) -> Result<Option<i32>, Box<dyn std::error::Error>> {
+    pub fn detect(
+        &mut self,
+        frame: &mut Mat,
+        rect: Option<&mut core::Rect>,
+        draw: Option<&mut Mat>,
+    ) -> Result<Option<f64>, Box<dyn std::error::Error>> {
         self.detector.detect_markers(
             frame,
             &mut self.corners,
@@ -46,12 +51,18 @@ impl Aruco {
 
         let bounding = self.corners.get(index).unwrap();
         let center = util::avg_corners(&bounding);
-        let rect = util::bounding_to_rect(&bounding);
+        let brect = util::bounding_to_rect(&bounding, 0);
 
-        util::draw_rect(frame, &bounding)?;
-        util::draw_x(frame, center)?;
-        util::rect(frame, rect)?;
+        if let Some(rect) = rect {
+            rect.clone_from(&brect);
+        }
 
-        Ok(Some(center.x))
+        if let Some(draw) = draw {
+            util::draw_bounds(draw, &bounding, Color::Green)?;
+            util::draw_x(draw, center, Color::Red)?;
+            util::rect(draw, brect, Color::Yellow)?;
+        }
+
+        Ok(Some(util::relative_x(&frame, center)))
     }
 }
