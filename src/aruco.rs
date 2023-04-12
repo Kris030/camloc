@@ -22,7 +22,7 @@ impl Aruco {
                 objdetect::RefineParameters {
                     min_rep_distance: 0.5,
                     error_correction_rate: 1.0,
-                    check_all_orders: false,
+                    check_all_orders: true,
                 },
             )?,
             corners: opencv::types::VectorOfVectorOfPoint2f::new(),
