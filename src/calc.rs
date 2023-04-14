@@ -27,26 +27,24 @@ impl Display for Coordinates {
 /// Physical characteristics of a camera
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub struct CameraInfo {
-    /// Horizontal, vertical FOV (**in radians**)
-    pub fov: (f64, f64),
+    /// Horizontal FOV (**in radians**)
+    pub fov: f64,
 }
 
 impl CameraInfo {
-    /// FOV **in degrees**
-    pub fn new(fov: (f64, f64)) -> Self {
-        Self {
-            fov: (fov.0.to_radians(), fov.1.to_radians())
-        }
+    /// FOV is **in radians**
+    pub fn new(fov: f64) -> Self {
+        Self { fov }
     }
 }
 
 #[derive(Debug, PartialEq)]
 pub struct PlacedCamera {
-    info: CameraInfo,
-    pos: Coordinates,
+    pub info: CameraInfo,
+    pub pos: Coordinates,
 
     /// **IN RADIANS**
-    rot: f64,
+    pub rot: f64,
 }
 
 impl PlacedCamera {
@@ -84,16 +82,16 @@ impl Setup {
             .map(|c| {
                 let p = &cpos[ind % 4];
 
-                let bits = c.fov.0.to_bits();
+                let bits = c.fov.to_bits();
                 let d = match hmap.get(&bits) {
                     Some(v) => *v,
                     None => {
                         let v = 0.5 * square_size * (
                             1. / (
-                                0.5 * c.fov.0
+                                0.5 * c.fov
                             ).tan() + 1.
                         );
-                        hmap.insert(c.fov.0.to_bits(), v);
+                        hmap.insert(c.fov.to_bits(), v);
                         v
                     }
                 };
@@ -124,12 +122,12 @@ impl Setup {
         for i in 0..c {
             if let Some(x) = pxs[i] {
                 tangents[i] = Some(
-                    (self.cameras[i].rot + (self.cameras[i].info.fov.0 * (0.5 - x))).tan()
+                    (self.cameras[i].rot + (self.cameras[i].info.fov * (0.5 - x))).tan()
                 );
                 lines += 1;
             }
         }
-        if lines == 0 {
+        if lines < 2 {
             return None;
         }
 
@@ -156,7 +154,11 @@ impl Setup {
         Some(Coordinates::new(s.x / points, s.y / points))
     }
 
-    pub fn add_cameras(mut self, mut new_cameras: Vec<PlacedCamera>) {
-        self.cameras.append(&mut new_cameras);
+    pub fn cameras(&self) -> &[PlacedCamera] {
+        &self.cameras
+    }
+
+    pub fn camera_count(&self) -> usize {
+        self.cameras.len()
     }
 }

@@ -1,15 +1,20 @@
 use camloc::extrapolations::{LinearExtrapolation, Extrapolation};
 use camloc::scanning::{AddressTemplate, TemplateMember::*};
 use camloc::service::{LocationService, Position};
-use camloc::calc::{Setup, CameraInfo};
 use std::time::Duration;
 use tokio::time::sleep;
 
-#[tokio::main]
-async fn main() -> Result<(), String> {
-    let picamera = CameraInfo::new((62.2, 48.8));
-    let setup = Setup::new_square(3., vec![picamera; 2]);
+fn main() {
+    if let Err(e) = run() {
+        println!("[ERROR]: {e}");
+    } else {
+        println!("No errors");
+    }
+    println!("Exiting test...");
+}
 
+#[tokio::main]
+async fn run() -> Result<(), String> {
     let addresses = AddressTemplate::new(
         [Fixed(127), Fixed(0), Fixed(0), Fixed(1)],
         Templated(12340..12342)
@@ -22,7 +27,6 @@ async fn main() -> Result<(), String> {
     );
 
     let locations_service = LocationService::start_scanning(
-        setup,
         addresses,
         extrapolation,
     ).await?;
@@ -60,8 +64,6 @@ async fn main() -> Result<(), String> {
             sleep(Duration::from_millis(10)).await;
         }
     }
-
-    println!("Exiting test...");
 
     Ok(())
 }

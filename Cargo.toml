@@ -5,6 +5,6 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "1.25.0", features = [
-	"time", "net", "rt", "sync", "macros", "io-util", "io-std", "rt-multi-thread"
+	"time", "net", "rt", "sync", "macros", "io-util", "io-std", "rt-multi-thread", "fs"
 ] }
 

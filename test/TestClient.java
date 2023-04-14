@@ -106,9 +106,17 @@ class Main {
 	}
 
 	public static void main(String[] args) throws Exception {
+		if (args.length < 1) {
+			System.err.println("No client index provided, exiting...");
+			System.exit(1);
+		}
 		int me = Integer.parseInt(args[0]);
 		int port = 12340 + me;
 		System.err.printf("Running as %d on port %d", me, port);
+
+		int ms = 50;
+		if (args.length >= 2)
+			ms = Integer.parseInt(args[1]);
 
 		PositionGenerator generator = PositionGenerator.WANDER;
 		Iterator<Vector2> positions = generator.genPoints();
@@ -132,7 +140,7 @@ class Main {
 		
 				System.err.printf("Sending pos #%d | %.3f\n", i, d);
 				dos.writeDouble(d);
-				Thread.sleep(500);
+				Thread.sleep(ms);
 			}
 		}
 	}
