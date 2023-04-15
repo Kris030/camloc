@@ -1,5 +1,5 @@
 use opencv::{highgui, imgcodecs, prelude::*, videoio};
-use std::time::{SystemTime, UNIX_EPOCH};
+// use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn take_samples() -> opencv::Result<()> {
     highgui::named_window("videocap", highgui::WINDOW_AUTOSIZE)?;
@@ -9,6 +9,7 @@ pub fn take_samples() -> opencv::Result<()> {
     }
 
     let mut frame = Mat::default();
+    let mut index = 0;
     loop {
         cam.read(&mut frame)?;
         if frame.size()?.width < 1 {
@@ -16,25 +17,25 @@ pub fn take_samples() -> opencv::Result<()> {
         }
 
         highgui::imshow("videocap", &frame)?;
-
         match highgui::wait_key(10)? {
             // Q | esc
             113 | 27 => break,
             // space
             32 => {
                 // take pic
-                let timestamp = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
+                // let timestamp = SystemTime::now()
+                //     .duration_since(UNIX_EPOCH)
+                //     .unwrap()
+                //     .as_secs();
 
                 imgcodecs::imwrite(
-                    format!("img-{}.jpg", timestamp).as_str(),
+                    format!("img-{:0>3}.jpg", index).as_str(),
                     &frame,
                     &opencv::core::Vector::<i32>::default(),
                 )?;
 
-                println!("image saved to `img-{}.jpg`", timestamp)
+                println!("image saved to `img-{:0>3}.jpg`", index);
+                index += 1;
             }
             _ => (),
             // k => println!("{}", k),
