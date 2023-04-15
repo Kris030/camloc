@@ -1,9 +1,5 @@
-[package]
-name = "camloc-aruco"
-version = "0.1.0"
-edition = "2021"
+[workspace]
+members = ["camloc", "calibration"]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[dependencies]
-opencv = "0.78.2"
+[profile.release]
+strip = true
