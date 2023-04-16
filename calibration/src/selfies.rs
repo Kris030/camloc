@@ -1,5 +1,4 @@
 use opencv::{highgui, imgcodecs, prelude::*, videoio};
-// use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn take_samples() -> opencv::Result<()> {
     highgui::named_window("videocap", highgui::WINDOW_AUTOSIZE)?;
@@ -22,12 +21,6 @@ pub fn take_samples() -> opencv::Result<()> {
             113 | 27 => break,
             // space
             32 => {
-                // take pic
-                // let timestamp = SystemTime::now()
-                //     .duration_since(UNIX_EPOCH)
-                //     .unwrap()
-                //     .as_secs();
-
                 imgcodecs::imwrite(
                     format!("img-{:0>3}.jpg", index).as_str(),
                     &frame,

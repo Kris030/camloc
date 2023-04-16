@@ -9,8 +9,6 @@ use clap::Parser;
 use generate::generate_board;
 use selfies::take_samples;
 
-// use opencv::{highgui, prelude::*, videoio};
-
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -22,9 +20,9 @@ struct Args {
     #[arg(long)]
     selfie: bool,
 
-    /// Use calibration photos to export camera properties
+    /// Calibrate using sample photos and export calibration as <filename>
     #[arg(long)]
-    calibrate: bool,
+    calibrate: Option<String>,
 
     /// Number of rows in the generated image (should be odd)
     #[arg(long, default_value_t = 5)]
@@ -62,11 +60,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if args.generate {
         export_board(&board, args.margin, args.tile_res, &args.name)?;
-        println!("board successfully exported to `{}`", args.name);
     } else if args.selfie {
         take_samples()?;
-    } else if args.calibrate {
-        calibrate(&board, args.delay)?;
+    } else if let Some(save) = args.calibrate {
+        calibrate(&board, args.delay, save.as_str())?;
     }
 
     Ok(())

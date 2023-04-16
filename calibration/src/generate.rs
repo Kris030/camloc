@@ -33,5 +33,6 @@ pub fn export_board(
         1,
     )?;
     imgcodecs::imwrite(name.as_str(), &img, &opencv::core::Vector::<i32>::default())?;
+    println!("board successfully exported to `{}`", name);
     Ok(())
 }
