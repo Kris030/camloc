@@ -1,10 +1,10 @@
-use crate::{service::Position, calc::Coordinates, utils::Lerp};
+use crate::{service::Position, calc::Coordinate, utils::Lerp};
 use std::time::{Instant, Duration};
 
 pub trait Extrapolator: Send + Sync {
     fn add_datapoint(&mut self, position: Position);
 	fn get_last_datapoint(&self) -> Option<Position>;
-    fn extrapolate(&self, time: Instant) -> Option<Coordinates>;
+    fn extrapolate(&self, time: Instant) -> Option<Coordinate>;
 }
 
 pub struct Extrapolation {
@@ -42,7 +42,7 @@ impl Extrapolator for LinearExtrapolation {
 		self.p = (self.p + 1) % self.data.len();
     }
 
-    fn extrapolate(&self, time: Instant) -> Option<Coordinates> {
+    fn extrapolate(&self, time: Instant) -> Option<Coordinate> {
 		let p_prev = if self.p == 0 {
 			self.data.len() - 1
 		} else {
@@ -56,7 +56,7 @@ impl Extrapolator for LinearExtrapolation {
 		let tmax = d2.time - d1.time;
 		let t = td.as_secs_f64() / tmax.as_secs_f64();
 
-		Some(Coordinates::lerp(&d1.coordinates, &d2.coordinates, t))
+		Some(Coordinate::lerp(&d1.coordinates, &d2.coordinates, t))
     }
 
     fn get_last_datapoint(&self) -> Option<Position> {

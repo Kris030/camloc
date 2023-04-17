@@ -1,24 +1,24 @@
 use std::{collections::HashMap, fmt::Display};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Coordinates {
+pub struct Coordinate {
     pub x: f64,
     pub y: f64,
 }
 
-impl Coordinates {
+impl Coordinate {
     pub const fn new(x: f64, y: f64) -> Self {
-        Coordinates { x, y }
+        Coordinate { x, y }
     }
 }
 
-impl From<(f64, f64)> for Coordinates {
+impl From<(f64, f64)> for Coordinate {
     fn from((x, y): (f64, f64)) -> Self {
         Self::new(x, y)
     }
 }
 
-impl Display for Coordinates {
+impl Display for Coordinate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "({:.2}; {:.2})", self.x, self.y)
     }
@@ -38,17 +38,17 @@ impl CameraInfo {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub struct PlacedCamera {
     pub info: CameraInfo,
-    pub pos: Coordinates,
+    pub pos: Coordinate,
 
     /// **IN RADIANS**
     pub rot: f64,
 }
 
 impl PlacedCamera {
-    pub fn new(info: CameraInfo, pos: Coordinates, rot: f64) -> Self {
+    pub fn new(info: CameraInfo, pos: Coordinate, rot: f64) -> Self {
         Self { info, pos, rot }
     }
 }
@@ -97,7 +97,7 @@ impl Setup {
                 };
 
                 let info = c;
-                let pos = Coordinates::new(p.0 * d, p.1 * d);
+                let pos = Coordinate::new(p.0 * d, p.1 * d);
                 let rot = (ind as f64) * 90.;
                 ind += 1;
 
@@ -112,7 +112,7 @@ impl Setup {
         Self { cameras }
     }
 
-    pub fn calculate_position(&self, pxs: Vec<Option<f64>>) -> Option<Coordinates> {
+    pub fn calculate_position(&self, pxs: Vec<Option<f64>>) -> Option<Coordinate> {
         let c = self.cameras.len();
         debug_assert_eq!(c, pxs.len());
 
@@ -131,7 +131,7 @@ impl Setup {
             return None;
         }
 
-        let mut s = Coordinates::new(0., 0.);
+        let mut s = Coordinate::new(0., 0.);
 
         for i in 0..c {
             for j in (i + 1)..c {
@@ -151,7 +151,7 @@ impl Setup {
 
         let points = (lines * (lines - 1) / 2) as f64;
 
-        Some(Coordinates::new(s.x / points, s.y / points))
+        Some(Coordinate::new(s.x / points, s.y / points))
     }
 
     pub fn cameras(&self) -> &[PlacedCamera] {

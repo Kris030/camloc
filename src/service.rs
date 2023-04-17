@@ -1,18 +1,29 @@
-#![allow(non_upper_case_globals)]
-use tokio::{net::TcpStream, spawn, task::{JoinSet, JoinHandle}, sync::{RwLock, Mutex}, io::AsyncReadExt};
-use std::{sync::Arc, time::{Instant, Duration}, f64::NAN, fmt::{Debug, Display}, mem};
+use std::{sync::Arc, time::{Instant, Duration}, f64::NAN, fmt::{Debug, Display}, mem, net::SocketAddr};
+use tokio::{net::UdpSocket, spawn, task::{JoinHandle}, sync::{RwLock, Mutex}};
 
-use crate::{calc::{Coordinates, Setup, PlacedCamera, CameraInfo}, extrapolations::Extrapolation, scanning::AddressTemplate};
+use crate::{calc::{Coordinate, Setup, PlacedCamera, CameraInfo}, extrapolations::Extrapolation, utils::GenerationalValue};
 
+struct ClientInfo {
+	last_value: GenerationalValue<(f64, Instant)>,
+	address: SocketAddr,
+}
+impl ClientInfo {
+	fn new(address: SocketAddr, last_value: GenerationalValue<(f64, Instant)>) -> Self {
+		Self { address, last_value, }
+	}
+}
+
+type ConnectionSubscriber = fn(SocketAddr, PlacedCamera) -> ();
 type ServiceSubscriber = fn(Position) -> ();
 pub struct LocationService {
-	running: RwLock<bool>,
-	last_known_pos: RwLock<Position>,
+	connection_subscriptions: RwLock<Vec<ConnectionSubscriber>>,
+	subscriptions: RwLock<Vec<ServiceSubscriber>>,
+	clients: Mutex<Vec<ClientInfo>>,
 	extrap: RwLock<Option<Extrapolation>>,
-	subscribtions: RwLock<Vec<ServiceSubscriber>>,
+	last_known_pos: RwLock<Position>,
 	start_time: RwLock<Instant>,
+	running: RwLock<bool>,
 	setup: RwLock<Setup>,
-	connections: Mutex<Vec<(String, TcpStream)>>,
 }
 
 pub struct LocationServiceHandle {
@@ -38,168 +49,23 @@ impl Drop for LocationServiceHandle {
 }
 
 impl LocationService {
-	#[allow(unused)]
-	pub async fn start_scanning(
-		address_generator: AddressTemplate,
-		extrapolation: Option<Extrapolation>,
-	) -> Result<LocationServiceHandle, String> {
-		use tokio::time::sleep;
-
-		return Err("Client and regular scan doesn't implement info getting".to_string());
-		
-		async fn get_client_info(c: &mut TcpStream) -> Option<PlacedCamera> {
-			use tokio::io::AsyncWriteExt;
-			
-			// TODO: implement handshake for regular server and client
-			c.write_u8(1).await.ok()?;
-			let fov = c.read_f64().await.ok()?;
-			let (x, y) = (c.read_f64().await.ok()?, c.read_f64().await.ok()?);
-			let rot = c.read_f64().await.ok()?;
-
-			Some(
-				PlacedCamera::new(
-					CameraInfo::new(fov),
-					Coordinates::new(x, y),
-					rot
-				)
-			)
-		}
-
-		let start_time = Instant::now();
-		let (
-			initial_connections,
-			initial_cameras,
-		) = async {
-			let mut js = JoinSet::new();
-			for a in address_generator.into_iter() {
-				js.spawn(async move {
-					let Ok(mut c) = TcpStream::connect(&a).await else {
-						return None;
-					};
-
-					let Some(cam) = get_client_info(&mut c).await else {
-						return None;
-					};
-
-					Some(((a, c), cam))
-				});
-			}
-
-			let mut cons = vec![];
-			let mut cams = vec![];
-			while let Some(v) = js.join_next().await {
-				let Ok(v) = v else {
-					return Err("Connect task?? failed???".to_string())
-				};
-				let Some(v) = v else {
-					return Err("Failed to connect to to one of the hosts".to_string())
-				};
-
-				cons.push(v.0);
-				cams.push(v.1);
-			}
-			Ok((cons, cams))
-		}.await?;
-
-		let instance = LocationService {
-			running: RwLock::new(true),
-			last_known_pos: RwLock::new(Position {
-				start_time: unsafe { mem::transmute([0u8; 16]) },
-				time: unsafe { mem::transmute([0u8; 16]) },
-				coordinates: Coordinates::new(NAN, NAN),
-				interpolated: None,
-			}),
-			extrap: RwLock::new(extrapolation),
-			subscribtions: RwLock::new(vec![]),
-			start_time: RwLock::new(start_time),
-			connections: Mutex::new(initial_connections),
-			setup: RwLock::new(Setup::new_freehand(initial_cameras)),
-		};
-
-		let arc = Arc::new(instance);
-		let ret = arc.clone();
-		let sweep_handle = arc.clone();
-
-		let handle = spawn(
-			Self::run(
-				arc,
-				start_time,
-			)
-		);
-
-		spawn(async move {
-			while !*sweep_handle.running.read().await {
-
-				for a in address_generator.into_iter() {
-					let Ok(mut new_connection) = TcpStream::connect(&a).await else { continue };
-					let Some(info) = get_client_info(&mut new_connection).await else { continue };
-
-					let mut conn_handle = sweep_handle.connections.lock().await;
-					if conn_handle.iter().any(|(addr, _)| *addr == a) {
-						continue;
-					}
-					conn_handle.push((a, new_connection));
-					drop(conn_handle);
-
-					let mut setup_handle = sweep_handle.setup.write().await;
-					setup_handle.cameras.push(info);
-					drop(setup_handle);
-
-					sleep(Duration::from_millis(50)).await;
-				}
-				sleep(Duration::from_millis(500)).await;
-			}
-		});
-
-		Ok(LocationServiceHandle {
-			handle: Some(handle),
-			service: ret,
-		})
-	}
-
 	pub async fn start(
-		setup: Setup,
-		addresses: impl IntoIterator<Item = String>,
 		extrapolation: Option<Extrapolation>,
 	) -> Result<LocationServiceHandle, String> {
-		let connections = async {
-			let mut js = JoinSet::new();
-			for a in addresses {
-				js.spawn(async {
-					if let Ok(s) = TcpStream::connect(&a).await {
-						Some((a, s))
-					} else {
-						None
-					}
-				});
-			}
-
-			let mut cons = vec![];
-			while let Some(v) = js.join_next().await {
-				match v {
-					Ok(Some(v)) => cons.push(v),
-					_ => return Err("Couldn't connect to all hosts".to_string()),
-				}
-			}
-
-			Ok(cons)
-		}.await?;
-
 		let start_time = Instant::now();
-	
+
+		let udp_socket = UdpSocket::bind("localhost:1234").await
+			.map_err(|_| "Couldn't create socket")?;
+
 		let instance = LocationService {
 			running: RwLock::new(true),
-			last_known_pos: RwLock::new(Position {
-				start_time: unsafe { mem::transmute([0u8; 16]) },
-				time: unsafe { mem::transmute([0u8; 16]) },
-				coordinates: Coordinates::new(NAN, NAN),
-				interpolated: None,
-			}),
+			last_known_pos: RwLock::new(Position::default()),
 			extrap: RwLock::new(extrapolation),
-			subscribtions: RwLock::new(vec![]),
+			subscriptions: RwLock::new(vec![]),
+			connection_subscriptions: RwLock::new(vec![]),
+			clients: Mutex::new(vec![]),
+			setup: RwLock::new(Setup::new_freehand(vec![])),
 			start_time: RwLock::new(start_time),
-			connections: Mutex::new(connections),
-			setup: RwLock::new(setup),
 		};
 
 		let arc = Arc::new(instance);
@@ -208,6 +74,7 @@ impl LocationService {
 		let handle = spawn(
 			Self::run(
 				arc,
+				udp_socket,
 				start_time,
 			)
 		);
@@ -220,62 +87,131 @@ impl LocationService {
 
 	async fn run(
 		self: Arc<LocationService>,
+		udp_socket: UdpSocket,
 		start_time: Instant,
 	) {
+		let mut min_generation = 0;
+		let mut buf = [0u8; 64];
 
 		// FIXME: figure out how to handle errors
-		'outer: loop {
-			let r = self.running.read().await;
-			if !*r {
-				break;
-			}
-			drop(r);
-
-			let mut pxs = vec![None; self.setup.read().await.cameras.len()];
-			for (i, c) in self.connections.lock().await.iter_mut().enumerate() {
-				if let Ok(v) = c.1.read_f64().await {
-					pxs[i] = Some(v);
-				} else {
-					break 'outer;
-				}
-			}
-
-			let Some(pos) = self.setup.read().await.calculate_position(pxs) else {
-				break;
+		while *self.running.read().await {
+			let Ok((recv_len, address)) = udp_socket.recv_from(&mut buf).await else {
+				break
 			};
+			let time = Instant::now();
 
-			let calculated_position = Position {
-				coordinates: pos,
-				start_time,
-				time: Instant::now(),
-				interpolated: None,
-			};
+			match recv_len {
 
-			let mut global_position = self.last_known_pos.write().await;
-			*global_position = calculated_position;
+				// "organizer bonk"
+				1 if buf[0] == 0x0b => {
+					udp_socket.send_to(&[0x5a], address).await.unwrap();
+					continue;
+				},
 
-			let mut ex = self.extrap.write().await;
-			let Some(ref mut ex) = *ex else {
-				break;
-			};
-			ex.extrapolator.add_datapoint(calculated_position);
-	
-			let subs = self.subscribtions.read().await;
-	
-			for s in subs.iter() {
-				s(calculated_position);
+				// update value
+				8 => {
+					let mut clients = self.clients.lock().await;
+					let mut ci = None;
+					let (mut mins, mut mini) = (0, 0);
+
+					for (i, c) in clients.iter().enumerate() {
+						if c.last_value.generation() == min_generation {
+							mins += 1;
+							mini = i;
+						}
+						if c.address == address {
+							ci = Some(i);
+						}
+					}
+					if let Some(ci) = ci {
+						clients[ci].last_value.set((
+							f64::from_be_bytes(buf[..8].try_into().unwrap()),
+							time
+						));
+
+						if mins == 1 && mini == ci {
+							min_generation += 1;
+							self.update_position(start_time).await;
+						}
+					} else {
+						continue;
+					}
+				},
+
+				// connection request
+				33 if buf[0] == 0xcc => {
+					let x = f64::from_be_bytes(buf[1..9].try_into().unwrap());
+					let y = f64::from_be_bytes(buf[9..17].try_into().unwrap());
+					let r = f64::from_be_bytes(buf[17..25].try_into().unwrap());
+					let f = f64::from_be_bytes(buf[25..33].try_into().unwrap());
+
+					self.clients.lock().await.push(ClientInfo::new(
+						address,
+						GenerationalValue::new_with_generation(
+							(NAN, start_time),
+							min_generation
+						),
+					));
+
+					let cam = PlacedCamera::new(
+							CameraInfo::new(f),
+							Coordinate::new(x, y),
+							r
+					);
+					self.setup.write().await.cameras.push(cam);
+
+					for s in self.connection_subscriptions.read().await.iter() {
+						s(address, cam);
+					}
+
+					continue;
+				},
+
+				_ => break
 			}
 		}
+	}
+
+	async fn update_position(self: &Arc<LocationService>, start_time: Instant) -> Result<(), String> {
+		let pxs = vec![];
+		let pos = self.setup.read().await.calculate_position(pxs)
+			.ok_or("")?;
+
+		let calculated_position = Position {
+			coordinates: pos,
+			start_time,
+			time: Instant::now(),
+			interpolated: None,
+		};
+
+		let mut global_position = self.last_known_pos.write().await;
+		*global_position = calculated_position;
+
+		let mut ex = self.extrap.write().await;
+		if let Some(ref mut ex) = *ex {
+			ex.extrapolator.add_datapoint(calculated_position);
+		};
+
+		let subs = self.subscriptions.read().await;
+		for s in subs.iter() {
+			s(calculated_position);
+		}
+
+		Ok(())
 	}
 
 }
 
 impl LocationServiceHandle {
-
-	pub async fn subscribe(&self, action: fn(Position) -> ()) -> Result<(), String> {
-		let mut sw = self.service.subscribtions.write().await;
+	
+	pub async fn subscribe_connection(&self, action: ConnectionSubscriber) {
+		let mut sw = self.service.connection_subscriptions.write().await;
 		sw.push(action);
-		Ok(())
+	}
+
+	pub async fn subscribe(&self, action: ServiceSubscriber) {
+		let mut sw = self.service.subscriptions.write().await;
+		sw.push(action);
 	}
 
 	pub async fn get_position(&self) -> Option<Position> {
@@ -315,13 +251,24 @@ impl LocationServiceHandle {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Position {
-    pub coordinates: Coordinates,
+    pub coordinates: Coordinate,
     start_time: Instant,
     pub time: Instant,
 
 	/// - None - not interpolated
 	/// - Some(d) - interpolated by d time
 	pub interpolated: Option<Duration>,
+}
+
+impl Default for Position {
+    fn default() -> Self {
+        Self {
+			start_time: unsafe { mem::transmute([0u8; 16]) },
+			time: unsafe { mem::transmute([0u8; 16]) },
+			coordinates: Coordinate::new(NAN, NAN),
+			interpolated: None,
+		}
+    }
 }
 
 impl Display for Position {

@@ -1,8 +1,8 @@
-use std::ops::Range;
+use std::ops::RangeInclusive;
 
 #[derive(Debug, Clone)]
 pub enum TemplateMember<T> {
-    Templated(Range<T>),
+    Templated(RangeInclusive<T>),
     Fixed(T),
 }
 
@@ -18,46 +18,76 @@ impl AddressTemplate {
 	}
 }
 
-impl IntoIterator for &AddressTemplate {
+pub struct AddressTemplateIter {
+	ranges: [(usize, usize); 5],
+	state: [usize; 5],
+	last: bool,
+}
+impl AddressTemplateIter {
+    fn new(templ: &AddressTemplate) -> AddressTemplateIter {
+        let iter0 = match &templ.template[0] {
+			TemplateMember::Fixed(f) => { let f = *f as usize; (f, f)},
+			TemplateMember::Templated(r) => (*r.start() as usize, *r.end() as usize),
+		};
+		let iter1 = match &templ.template[1] {
+			TemplateMember::Fixed(f) => { let f = *f as usize; (f, f)},
+			TemplateMember::Templated(r) => (*r.start() as usize, *r.end() as usize),
+		};
+		let iter2 = match &templ.template[2] {
+			TemplateMember::Fixed(f) => { let f = *f as usize; (f, f)},
+			TemplateMember::Templated(r) => (*r.start() as usize, *r.end() as usize),
+		};
+		let iter3 = match &templ.template[3] {
+			TemplateMember::Fixed(f) => { let f = *f as usize; (f, f)},
+			TemplateMember::Templated(r) => (*r.start() as usize, *r.end() as usize),
+		};
+		let ports = match &templ.port {
+			TemplateMember::Fixed(f) => { let f = *f as usize; (f, f)},
+			TemplateMember::Templated(r) => (*r.start() as usize, *r.end() as usize),
+		};
+		Self {
+			state: [iter0.0, iter1.0, iter2.0, iter3.0, ports.0],
+			ranges: [iter0, iter1, iter2, iter3, ports],
+			last: false,
+		}
+    }
+}
+
+impl Iterator for AddressTemplateIter {
     type Item = String;
-    type IntoIter = std::vec::IntoIter<String>;
 
-    fn into_iter(self) -> Self::IntoIter {
-        let mut res = vec![];
+    fn next(&mut self) -> Option<Self::Item> {
+		if self.last {
+			return None;
+		}
+		let ret = format!("{}.{}.{}.{}:{}", self.state[0], self.state[1], self.state[1], self.state[3], self.state[4]);
 
-		let iter0: Vec<u8> = match &self.template[0] {
-			TemplateMember::Fixed(f) => vec![*f],
-			TemplateMember::Templated(r) => r.clone().collect(),
-		};
-		let iter1: Vec<u8> = match &self.template[1] {
-			TemplateMember::Fixed(f) => vec![*f],
-			TemplateMember::Templated(r) => r.clone().collect(),
-		};
-		let iter2: Vec<u8> = match &self.template[2] {
-			TemplateMember::Fixed(f) => vec![*f],
-			TemplateMember::Templated(r) => r.clone().collect(),
-		};
-		let iter3: Vec<u8> = match &self.template[3] {
-			TemplateMember::Fixed(f) => vec![*f],
-			TemplateMember::Templated(r) => r.clone().collect(),
-		};
-		let ports: Vec<u16> = match &self.port {
-			TemplateMember::Fixed(f) => vec![*f],
-			TemplateMember::Templated(r) => r.clone().collect(),
-		};
+		let mut i = 4;
+		loop {
+			if self.state[i] == self.ranges[i].1 {
+				self.state[i] = self.ranges[i].0;
 
-		for b1 in &iter0 {
-			for b2 in &iter1 {
-				for b3 in &iter2 {
-					for b4 in &iter3 {
-						for p in &ports {
-							res.push(format!("{b1}.{b2}.{b3}.{b4}:{p}"));
-						}
-					}
+				if i == 0 {
+					self.last = true;
+					return Some(ret);
+				} else {
+					i -= 1;
 				}
+			} else {
+				self.state[i] += 1;
+				break;
 			}
 		}
 
-        res.into_iter()
+		Some(ret)
+    }
+}
+
+impl IntoIterator for &AddressTemplate {
+    type IntoIter = AddressTemplateIter;
+    type Item = String;
+
+    fn into_iter(self) -> Self::IntoIter {
+		AddressTemplateIter::new(self)
     }
 }

@@ -1,8 +1,10 @@
-use camloc::extrapolations::{LinearExtrapolation, Extrapolation};
-use camloc::service::{LocationService, Position};
-use camloc::calc::{Setup, CameraInfo};
-use tokio::{time::sleep, fs};
+use camloc::{
+    extrapolations::{LinearExtrapolation, Extrapolation},
+    service::{LocationService, Position},
+    calc::PlacedCamera,
+};
 use std::time::Duration;
+use tokio::time::sleep;
 
 fn main() {
     if let Err(e) = run() {
@@ -13,53 +15,37 @@ fn main() {
     println!("Exiting test...");
 }
 
-async fn send_cameras(setup: &Setup, addresses: &[String]) -> tokio::io::Result<()> {
-    #[allow(clippy::needless_range_loop)]
-    for a in 0..setup.camera_count() {
-        use tokio::io::{stderr, AsyncWriteExt};
+async fn send_camera(address: String, camera: PlacedCamera) -> tokio::io::Result<()> {
+    use tokio::io::{stderr, AsyncWriteExt};
 
-        let mut se = stderr();
-        se.write_i32(1).await?;
-        se.write_u16(addresses[a].len() as u16).await?;
-        se.write_all(addresses[a].as_bytes()).await?;
+    let mut se = stderr();
+    se.write_i32(1).await?;
+    se.write_u16(address.len() as u16).await?;
+    se.write_all(address.as_bytes()).await?;
 
-        let c = &setup.cameras()[a];
-        se.write_f64(c.pos.x).await?;
-        se.write_f64(c.pos.y).await?;
-        se.write_f64(c.rot).await?;
+    se.write_f64(camera.pos.x).await?;
+    se.write_f64(camera.pos.y).await?;
+    se.write_f64(camera.rot).await?;
 
-        se.write_f64(c.info.fov).await?;
-
-    }
+    se.write_f64(camera.info.fov).await?;
 
     Ok(())
 }
 
 #[tokio::main]
 async fn run() -> Result<(), String> {
-    let picamera = CameraInfo::new(62.2f64.to_radians());
-    let setup = Setup::new_square(3., vec![picamera; 2]);
-
-    let addresses: Vec<String> = fs::read_to_string("address_lists/local.txt").await
-        .map_err(|_| "Failed to read addresses".to_string())?
-        .lines()
-        .map(|l| l.to_string())
-        .collect();
-
-    send_cameras(&setup, &addresses).await
-        .map_err(|_| "Couldn't write camera info".to_string())?;
-
-    let extrapolation = Some(
-        Extrapolation::new::<LinearExtrapolation>(
-            Duration::from_millis(500)
-        )
-    );
-
     let locations_service = LocationService::start(
-        setup,
-        addresses,
-        extrapolation,
+        Some(
+            Extrapolation::new::<LinearExtrapolation>(
+                Duration::from_millis(500)
+            )
+        )
     ).await?;
+
+    locations_service.subscribe_connection(|address, camera| {
+        let address = address.to_string();
+        tokio::spawn(async move { send_camera(address, camera).await });
+    }).await;
 
     async fn write_to_stderr_binary(p: Position) {
         use tokio::io::{stderr, AsyncWriteExt};
@@ -80,7 +66,7 @@ async fn run() -> Result<(), String> {
     if true {
         locations_service.subscribe(|p| {
             tokio::spawn(write_to_stderr_binary(p));
-        }).await?;
+        }).await;
         sleep(Duration::from_secs(10000000)).await
     } else {
         let mut missing_positions = 0;

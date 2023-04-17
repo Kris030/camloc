@@ -4,7 +4,7 @@ loop
 	recieve message
 		if organizer ping [RECV 0x0b: u8] // "organizer bonk"
 			pong [SEND 0x5a: u8] // "server answer"
-		if (client) connection request and camera location [RECV 0xcc: u8, x: f64, y: f64, rotation: f64] // "client connect"
+		if (client) connection request and camera info [RECV 0xcc: u8, x: f64, y: f64, rotation: f64, fov: f64] // "client connect"
 			accept, add to clients
 		if (client) value update [RECV value: f64]
 			update value
@@ -20,9 +20,9 @@ outer loop
 	reply with pong [SEND 0xca: u8] // "client answer"
 	wait for organizer start [RECV 0x60: u8] // "go"
 	send image from camera // [SEND TODO]
-	recieve camera location and server ip [RECV x: f64, y: f64, rotation: f64]
+	recieve camera info and server ip [RECV x: f64, y: f64, rotation: f64, fov: f64]
 	connect to server
-		send connection request and camera location [SEND 0xcc: u8, x: f64, y: f64, rotation: f64] // "client connect"
+		send connection request and camera info [SEND 0xcc: u8, x: f64, y: f64, rotation: f64, fov: f64] // "client connect"
 	inner loop
 		check for organizer command
 			if stop [RECV 0x0d: u8] // "organizer die command"
@@ -48,7 +48,7 @@ loop
 		if client start
 			send start [SEND 0x60: u8] // "go"
 			recieve image [RECV TODO]
-			show image to user and prompt for camera location
-			send camera location [SEND x: f64, y: f64, rotation: f64]
+			show image to user and prompt for camera info
+			send camera info [SEND x: f64, y: f64, rotation: f64, fov: f64]
 		if client stop
 			send stop [SEND 0x0d: u8] // "organizer die command"
