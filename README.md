@@ -1,5 +1,64 @@
 # camloc-aruco
 
+## protocol
+
+```
+CAMLOC SERVER
+
+loop
+    recieve message
+        if organizer ping [RECV 0x0b: u8] // "organizer bonk"
+            pong [SEND 0x5a: u8] // "server answer"
+        if (client) connection request and camera info [RECV 0xcc: u8, x: f64, y: f64, rotation: f64, fov: f64] // "client connect"
+            accept, add to clients
+        if (client) value update [RECV value: f64]
+            update value
+            if all values updated
+                calculate new position
+                notify subscribers
+
+
+CAMLOC CLIENT
+
+outer loop
+    wait for organizer ping [RECV 0x0b: u8] // "organizer bonk"
+    reply with pong [SEND 0xca: u8] // "client answer"
+    wait for organizer start [RECV 0x60: u8] // "go"
+    send image from camera // [SEND TODO]
+    recieve camera info and server ip [RECV x: f64, y: f64, rotation: f64, fov: f64]
+    connect to server
+        send connection request and camera info [SEND 0xcc: u8, x: f64, y: f64, rotation: f64, fov: f64] // "client connect"
+    inner loop
+        check for organizer command
+            if stop [RECV 0x0d: u8] // "organizer die command"
+                break (inner)
+        find x value
+        send value to server [SEND value: f64]
+
+
+CAMLOC ORGANIZER
+
+loop
+    loop through ips
+        send ping [SEND 0x0b: u8] // "organizer bonk"
+        if offline
+            continue
+        if server [RECV 0x5a: u8] // "server answer"
+            set server ip
+        if client [RECV 0xca: u8] // "client answer"
+            add to clients
+
+    get user input
+    loop through actions
+        if client start
+            send start [SEND 0x60: u8] // "go"
+            recieve image [RECV TODO]
+            show image to user and prompt for camera info
+            send camera info [SEND x: f64, y: f64, rotation: f64, fov: f64]
+        if client stop
+            send stop [SEND 0x0d: u8] // "organizer die command"
+```
+
 ## docker for cross-compilation
 
 #### prerequisites
@@ -21,76 +80,4 @@ docker buildx build -t camloc-build .
 ```sh
 # (in project root)
 docker run --rm -it --platform linux/arm/v7 -v $PWD:/app camloc-build
-```
-
-## issues
-
-The `objdetect` module of opencv does not work on `linux/arm32v7` architectures (compiled from both docker and raspberry).
-
-This issue may be relevant, however the root of the problem might be windows (opencv installed from scoop doesn't ship like half of the modules):
-https://github.com/twistedfall/opencv-rust/issues/447
-
-Compiler dump:
-
-```sh
-error[E0433]: failed to resolve: could not find `ArucoDetector` in `objdetect`
-  --> src/aruco.rs:17:34
-   |
-17 |             detector: objdetect::ArucoDetector::new(
-   |                                  ^^^^^^^^^^^^^ could not find `ArucoDetector` in `objdetect`
-
-error[E0433]: failed to resolve: could not find `PredefinedDictionaryType` in `objdetect`
-  --> src/aruco.rs:19:32
-   |
-19 |                     objdetect::PredefinedDictionaryType::DICT_4X4_50,
-   |                                ^^^^^^^^^^^^^^^^^^^^^^^^ could not find `PredefinedDictionaryType` in `objdetect`
-
-error[E0412]: cannot find type `ArucoDetector` in module `objdetect`
- --> src/aruco.rs:5:26
-  |
-5 |     detector: objdetect::ArucoDetector,
-  |                          ^^^^^^^^^^^^^ not found in `objdetect`
-
-error[E0425]: cannot find function `get_predefined_dictionary` in module `objdetect`
-  --> src/aruco.rs:18:29
-   |
-18 |                 &objdetect::get_predefined_dictionary(
-   |                             ^^^^^^^^^^^^^^^^^^^^^^^^^ not found in `objdetect`
-   |
-help: consider importing this function
-   |
-1  | use opencv::aruco::get_predefined_dictionary;
-   |
-help: if you import `get_predefined_dictionary`, refer to it directly
-   |
-18 -                 &objdetect::get_predefined_dictionary(
-18 +                 &get_predefined_dictionary(
-   |
-
-error[E0433]: failed to resolve: could not find `DetectorParameters` in `objdetect`
-  --> src/aruco.rs:21:29
-   |
-21 |                 &objdetect::DetectorParameters::default()?,
-   |                             ^^^^^^^^^^^^^^^^^^ could not find `DetectorParameters` in `objdetect`
-   |
-help: a trait with a similar name exists
-   |
-21 |                 &objdetect::DetectorParametersTrait::default()?,
-   |                             ~~~~~~~~~~~~~~~~~~~~~~~
-help: consider importing this struct
-   |
-1  | use opencv::aruco::DetectorParameters;
-   |
-help: if you import `DetectorParameters`, refer to it directly
-   |
-21 -                 &objdetect::DetectorParameters::default()?,
-21 +                 &DetectorParameters::default()?,
-   |
-
-error[E0422]: cannot find struct, variant or union type `RefineParameters` in module `objdetect`
-  --> src/aruco.rs:22:28
-   |
-22 |                 objdetect::RefineParameters {
-   |                            ^^^^^^^^^^^^^^^^ not found in `objdetect`
-
 ```
