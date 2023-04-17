@@ -37,23 +37,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if frame.size()?.width < 1 {
                 continue;
             }
-
             draw = frame.clone();
-            let mut xd = f64::NAN;
 
+            let mut final_x = f64::NAN;
             // tracking logic
             if !has_object {
                 if let Some(x) =
                     aruco.detect(&mut frame, Some(&mut tracker.rect), Some(&mut draw))?
                 {
-                    xd = x;
+                    final_x = x;
                     has_object = true;
                     tracker.init(&frame);
                     // println!("{} | switching to tracking", x.unwrap());
                 }
             } else {
                 if let Some(x) = tracker.track(&frame, Some(&mut draw))? {
-                    xd = x;
+                    final_x = x;
                     // println!("{}", x);
                 } else {
                     has_object = false;
@@ -62,7 +61,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             highgui::imshow("videocap", &draw)?;
-            if tcp_stream.write_all(&xd.to_be_bytes()).is_err() {
+            if tcp_stream.write_all(&final_x.to_be_bytes()).is_err() {
                 break;
             }
         }

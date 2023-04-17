@@ -44,14 +44,14 @@ fn detect_boards(
 
     highgui::named_window("videocap", highgui::WINDOW_AUTOSIZE)?;
     let mut frame = Mat::default();
-    let mut draw: Mat;
+    let mut draw = Mat::default();
 
     loop {
         cap.read(&mut frame)?;
         if frame.size()?.width < 1 {
             break;
         }
-        draw = frame.clone();
+        frame.copy_to(&mut draw)?;
 
         // detect
         marker_detector.detect_markers(
@@ -172,11 +172,12 @@ pub fn save_camera_params(
 
 #[allow(unused)]
 pub fn load_camera_params(
+    filename: &str,
     camera_matrix: &mut Mat,
     dist_coeffs: &mut Mat,
     optimal_matrix: &mut Mat,
 ) -> opencv::Result<()> {
-    let mut fs = FileStorage::new("test.xml", core::FileStorage_READ, "")?;
+    let mut fs = FileStorage::new(filename, core::FileStorage_READ, "")?;
 
     fs.get("camera_matrix")?.mat()?.copy_to(camera_matrix)?;
     fs.get("dist_coeffs")?.mat()?.copy_to(dist_coeffs)?;

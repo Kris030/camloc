@@ -24,6 +24,10 @@ struct Args {
     #[arg(long)]
     calibrate: Option<String>,
 
+    /// When using selfie, undistort image using <filename>
+    #[arg(long)]
+    undistort: Option<String>,
+
     /// Number of rows in the generated image (should be odd)
     #[arg(long, default_value_t = 5)]
     rows: i32,
@@ -53,7 +57,6 @@ struct Args {
     camera_index: i32,
 }
 
-#[allow(unused)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let board = generate_board(args.cols, args.rows)?;
@@ -61,7 +64,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args.generate {
         export_board(&board, args.margin, args.tile_res, &args.name)?;
     } else if args.selfie {
-        take_samples()?;
+        take_samples(args.undistort)?;
     } else if let Some(save) = args.calibrate {
         calibrate(&board, args.delay, save.as_str())?;
     }
