@@ -39,11 +39,12 @@ async fn run() -> Result<(), String> {
             Extrapolation::new::<LinearExtrapolation>(
                 Duration::from_millis(500)
             )
-        )
+        ), 1234
     ).await?;
 
     locations_service.subscribe_connection(|address, camera| {
         let address = address.to_string();
+        println!("New camera connected from {address}");
         tokio::spawn(async move { send_camera(address, camera).await });
     }).await;
 

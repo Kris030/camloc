@@ -1,4 +1,4 @@
 #!/bin/bash
 cargo build --release --example main &&
 exec 3> >(java test/TestDisplay.java) &&
-./target/debug/examples/main 2>&3
+./target/release/examples/main 2>&3

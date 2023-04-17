@@ -1,0 +1,10 @@
+#!/bin/sh
+
+ms=${2:-50}
+
+while true; do
+	clear
+	cargo r -q --release --example test_client_config_gen -- "../dump/conf$1" "$1" "$ms" &&
+		java TestClient.java "../dump/conf$1"
+	sleep 3
+done

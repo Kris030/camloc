@@ -1,15 +1,24 @@
 import java.io.FileNotFoundException;
+import java.net.InetSocketAddress;
 import java.io.DataInputStream;
-import java.io.DataOutputStream;
 import java.io.FileInputStream;
-import java.net.ServerSocket;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.SocketAddress;
 import java.util.ArrayList;
+import java.nio.ByteBuffer;
 import java.util.Iterator;
 import java.util.Arrays;
 import java.util.Random;
-import java.net.Socket;
 
 class Main {
+
+	public record Config(
+		int id, SocketAddress serverAddress,
+		Vector2 pos, double rot, double fov,
+		long ms
+	) {}
+
 	record Vector2(double x, double y) {}
 
 	static double clamp(double value, double min, double max) {
@@ -86,9 +95,9 @@ class Main {
 		abstract Iterator<Vector2> genPoints();
 	}
 
-	static Vector2[] getPositionsFromFile() throws FileNotFoundException {
+	static Vector2[] getPositionsFromFile(String file) throws FileNotFoundException {
 		ArrayList<Vector2> l = new ArrayList<Vector2>();
-		try (DataInputStream dis = new DataInputStream(new FileInputStream("dump"))) {
+		try (DataInputStream dis = new DataInputStream(new FileInputStream(file))) {
 			while (true) {
 				double x1 = dis.readDouble(), x2 = dis.readDouble();
 				l.add(new Vector2(x1, x2));
@@ -105,42 +114,62 @@ class Main {
 		);
 	}
 
-	public static void main(String[] args) throws Exception {
-		if (args.length < 1) {
-			System.err.println("No client index provided, exiting...");
-			System.exit(1);
-		}
-		int me = Integer.parseInt(args[0]);
-		int port = 12340 + me;
-		System.err.printf("Running as %d on port %d", me, port);
+	static Config getConfig(String file) {
+		try (var dis = new DataInputStream(new FileInputStream(file))) {
+			int id = dis.readInt();
 
-		int ms = 50;
-		if (args.length >= 2)
-			ms = Integer.parseInt(args[1]);
+			String addr = dis.readUTF();
+			int port = dis.readInt();
+
+			double x = dis.readDouble();
+			double y = dis.readDouble();
+			double r = dis.readDouble();
+			double f = dis.readDouble();
+
+			long ms = dis.readLong();
+			return new Config(id, new InetSocketAddress(addr, port), new Vector2(x, y), r, f, ms);
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+		return null;
+	}
+
+	public static void main(String[] args) throws Exception {
+		Config config = getConfig(args[0]);
+		System.err.println("Starting with config:");
+		System.err.println(config);
 
 		PositionGenerator generator = PositionGenerator.WANDER;
 		Iterator<Vector2> positions = generator.genPoints();
 
-		try (ServerSocket ss = new ServerSocket(port)) {
-			ss.setSoTimeout(0);
-
-			Socket s = ss.accept();
-			DataOutputStream dos = new DataOutputStream(s.getOutputStream());
+		try (var ds = new DatagramSocket()) {
+			byte[] buff = ByteBuffer.allocate(1 + 4 * 8)
+				.put((byte) 0xcc)
+				.putDouble(config.pos.x)
+				.putDouble(config.pos.y)
+				.putDouble(config.rot)
+				.putDouble(config.fov) // TODO: ?
+				.array();
+			ds.send(new DatagramPacket(buff, buff.length, config.serverAddress));
 
 			for (int i = 0; positions.hasNext(); i++) {
 				Vector2 p = positions.next();
 
 				double d;
-				if (me == 0)
+				if (config.id == 0)
 					d = p.x;
-				else if (me == 1)
+				else if (config.id == 1)
 					d = p.y;
 				else
 					throw new Exception("bruh");
 		
 				System.err.printf("Sending pos #%d | %.3f\n", i, d);
-				dos.writeDouble(d);
-				Thread.sleep(ms);
+
+				buff = ByteBuffer.allocate(8)
+					.putDouble(d)
+					.array();
+				ds.send(new DatagramPacket(buff, buff.length, config.serverAddress));
+				Thread.sleep(config.ms);
 			}
 		}
 	}

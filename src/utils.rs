@@ -30,12 +30,12 @@ impl<T> GenerationalValue<T> {
         Self { generation: 0, value }
     }
     pub fn new_with_generation(value: T, generation: usize) -> Self {
-        Self {
-            generation,
-            value,
-        }
+        Self { generation, value }
     }
 
+    pub fn get(&self) -> &T {
+        &self.value
+    }
     pub fn set(&mut self, value: T) {
         self.generation += 1;
         self.value = value;

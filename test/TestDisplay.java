@@ -48,7 +48,7 @@ public class TestDisplay {
 							}
 							break;
 
-						default: throw new RuntimeException("WHAT???");
+						default: throw new RuntimeException("WHAT??? " + what);
 					}
 				} catch (EOFException e) {
 					break;

@@ -54,7 +54,7 @@ impl PlacedCamera {
 }
 
 pub struct Setup {
-    pub(crate) cameras: Vec<PlacedCamera>,
+    pub cameras: Vec<PlacedCamera>,
 }
 
 impl Setup {
@@ -112,7 +112,7 @@ impl Setup {
         Self { cameras }
     }
 
-    pub fn calculate_position(&self, pxs: Vec<Option<f64>>) -> Option<Coordinate> {
+    pub fn calculate_position(&self, pxs: &Vec<Option<f64>>) -> Option<Coordinate> {
         let c = self.cameras.len();
         debug_assert_eq!(c, pxs.len());
 
@@ -152,13 +152,5 @@ impl Setup {
         let points = (lines * (lines - 1) / 2) as f64;
 
         Some(Coordinate::new(s.x / points, s.y / points))
-    }
-
-    pub fn cameras(&self) -> &[PlacedCamera] {
-        &self.cameras
-    }
-
-    pub fn camera_count(&self) -> usize {
-        self.cameras.len()
     }
 }
