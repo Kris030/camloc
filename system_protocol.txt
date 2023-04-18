@@ -22,7 +22,7 @@ CAMLOC CLIENT
 
 outer loop
 	wait for organizer ping [RECV 0x0b: u8] // "organizer bonk"
-	reply with pong [SEND 0xca: u8] // "client answer"
+	reply with pong [SEND 0xcf: u8] // "client fucking around"
 	wait for organizer start [RECV 0x60: u8] // "go"
 	send image from camera // [SEND TODO]
 	recieve camera info and server ip [RECV x: f64, y: f64, rotation: f64, fov: f64, ip_len: u16, ip: [u8]]
@@ -32,23 +32,27 @@ outer loop
 		check for command
 			if stop [RECV 0xcd: u8] // "client die command"
 				break (inner)
+			if organizer ping [RECV 0x0b: u8] // "organizer bonk"
+				reply with pong [SEND 0xca: u8] // "client active"
 		find x value
 		send value to server [SEND value: f64]
 
 
 CAMLOC ORGANIZER
 
-loop
+thread 1
 	loop through ips
 		send ping [SEND 0x0b: u8] // "organizer bonk"
 		if offline
 			continue
 		if server [RECV 0x5a: u8] // "server answer"
 			set server ip
-		if client [RECV 0xca: u8] // "client answer"
-			add to clients
+		if client [RECV 0xca: u8] // "client active"
+			add / move to active clients
+		if client [RECV 0xcf: u8] // "client fucking around"
+			add / move to to idle clients
 
-	get user input
+on user input
 	loop through actions
 		if client start
 			send start [SEND 0x60: u8] // "go"
