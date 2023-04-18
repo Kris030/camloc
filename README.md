@@ -1,83 +1,22 @@
 # camloc-aruco
 
-## protocol
-
-```
-CAMLOC SERVER
-
-loop
-    recieve message
-        if organizer ping [RECV 0x0b: u8] // "organizer bonk"
-            pong [SEND 0x5a: u8] // "server answer"
-        if (client) connection request and camera info [RECV 0xcc: u8, x: f64, y: f64, rotation: f64, fov: f64] // "client connect"
-            accept, add to clients
-        if (client) value update [RECV value: f64]
-            update value
-            if all values updated
-                calculate new position
-                notify subscribers
-
-
-CAMLOC CLIENT
-
-outer loop
-    wait for organizer ping [RECV 0x0b: u8] // "organizer bonk"
-    reply with pong [SEND 0xca: u8] // "client answer"
-    wait for organizer start [RECV 0x60: u8] // "go"
-    send image from camera // [SEND TODO]
-    recieve camera info and server ip [RECV x: f64, y: f64, rotation: f64, fov: f64]
-    connect to server
-        send connection request and camera info [SEND 0xcc: u8, x: f64, y: f64, rotation: f64, fov: f64] // "client connect"
-    inner loop
-        check for organizer command
-            if stop [RECV 0x0d: u8] // "organizer die command"
-                break (inner)
-        find x value
-        send value to server [SEND value: f64]
-
-
-CAMLOC ORGANIZER
-
-loop
-    loop through ips
-        send ping [SEND 0x0b: u8] // "organizer bonk"
-        if offline
-            continue
-        if server [RECV 0x5a: u8] // "server answer"
-            set server ip
-        if client [RECV 0xca: u8] // "client answer"
-            add to clients
-
-    get user input
-    loop through actions
-        if client start
-            send start [SEND 0x60: u8] // "go"
-            recieve image [RECV TODO]
-            show image to user and prompt for camera info
-            send camera info [SEND x: f64, y: f64, rotation: f64, fov: f64]
-        if client stop
-            send stop [SEND 0x0d: u8] // "organizer die command"
-```
+This is the client implementation of: [system_protocol.txt](https://github.com/Kris030/camloc/blob/master/system_protocol.txt)
 
 ## docker for cross-compilation
 
-#### prerequisites
+### building
 
-[QEMU user static](https://github.com/multiarch/qemu-user-static)
+Camloc uses the 4.7.0 version of opencv which is not available yet on most stable release distros, so compilation
+has to be done on a rolling-release one, like Arch. However, the official Archlinux docker image does not support
+arm platforms, so [the archlinuxarm](https://github.com/agners/archlinuxarm-docker) image was used. Note that building
+the image does not work with buildkit (refer to: [this](https://github.com/moby/buildkit/issues/1267), and [this](https://stackoverflow.com/questions/63652551/docker-build-vs-docker-run-dont-behave-the-same)), so it needs to be disabled.
 
 ```sh
-docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+DOCKER_BUILDKIT=0 docker build --platform linux/arm/v7 -t arch-build .
 ```
 
-#### building
+### running
 
 ```sh
-docker buildx build -t camloc-build .
-```
-
-#### running
-
-```sh
-# (in project root)
-docker run --rm -it --platform linux/arm/v7 -v $PWD:/app camloc-build
+docker run --rm -it -v $PWD:/app arch-build
 ```
