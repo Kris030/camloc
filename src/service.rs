@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::{Instant, Duration}, f64::NAN, fmt::{Debug, Display}, mem, net::SocketAddr};
+use std::{sync::Arc, time::{Instant, Duration}, f64::NAN, fmt::{Debug, Display}, mem, net::SocketAddr, future::IntoFuture};
 use tokio::{net::UdpSocket, spawn, task::{JoinHandle}, sync::{RwLock, Mutex}};
 
 use crate::{calc::{Coordinate, Setup, PlacedCamera, CameraInfo}, extrapolations::Extrapolation, utils::GenerationalValue};
@@ -17,6 +17,7 @@ impl ClientInfo {
 
 type ConnectionSubscriber = fn(SocketAddr, PlacedCamera) -> ();
 type ServiceSubscriber = fn(Position) -> ();
+
 pub struct LocationService {
 	connection_subscriptions: RwLock<Vec<ConnectionSubscriber>>,
 	subscriptions: RwLock<Vec<ServiceSubscriber>>,
@@ -33,20 +34,33 @@ pub struct LocationServiceHandle {
 	service: Arc<LocationService>,
 }
 
+impl Clone for LocationServiceHandle {
+    fn clone(&self) -> Self {
+        Self {
+			service: self.service.clone(),
+			handle: self.handle.clone(),
+		}
+    }
+}
+
 impl Drop for LocationServiceHandle {
     fn drop(&mut self) {
 		let handle = mem::replace(&mut self.handle, None)
 			.expect("Handle should always be Some");
 
 		let r = self.service.running.write();
-		tokio::task::block_in_place(|| {
+		let res = tokio::task::block_in_place(|| {
 			tokio::runtime::Handle::current().block_on(async {
 				let mut r = r.await;
 				*r = false;
 				drop(r);
+
 				handle.await
 			})
-		}).expect("Should always be able join the task").unwrap();
+		});
+
+		res.expect("Should always be able join the task")
+			.unwrap();
 	}
 }
 
@@ -61,14 +75,14 @@ impl LocationService {
 			.map_err(|_| "Couldn't create socket")?;
 
 		let instance = LocationService {
-			last_known_pos: RwLock::new(Position::default()),
-			setup: RwLock::new(Setup::new_freehand(vec![])),
-			connection_subscriptions: RwLock::new(vec![]),
-			start_time: RwLock::new(start_time),
-			subscriptions: RwLock::new(vec![]),
-			extrap: RwLock::new(extrapolation),
-			clients: Mutex::new(vec![]),
-			running: RwLock::new(true),
+			last_known_pos: Position::default().into(),
+			setup: Setup::new_freehand(vec![]).into(),
+			connection_subscriptions: vec![].into(),
+			start_time: start_time.into(),
+			subscriptions: vec![].into(),
+			extrap: extrapolation.into(),
+			clients: vec![].into(),
+			running: true.into(),
 		};
 
 		let arc = Arc::new(instance);
@@ -97,15 +111,15 @@ impl LocationService {
 		let mut buf = [0u8; 64];
 
 		while *self.running.read().await {
-			let (recv_len, address) = udp_socket.recv_from(&mut buf).await
+			let (recv_len, recv_addr) = udp_socket.recv_from(&mut buf).await
 				.map_err(|_| "Error while recieving")?;
-			let time = Instant::now();
+			let recv_time = Instant::now();
 
 			match recv_len {
 
 				// "organizer bonk"
 				1 if buf[0] == 0x0b => {
-					udp_socket.send_to(&[0x5a], address).await
+					udp_socket.send_to(&[0x5a], recv_addr).await
 						.map_err(|_| "Error while sending")?;
 				},
 
@@ -118,24 +132,24 @@ impl LocationService {
 					let mut values = vec![None; clients.len()];
 					for (i, c) in clients.iter().enumerate() {
 						let (value, time) = *c.last_value.get();
-						values[i] = if time.elapsed() > DATA_VALIDITY {
-							None
-						} else {
+						values[i] = if recv_time - time <= DATA_VALIDITY {
 							Some(value)
+						} else {
+							None
 						};
 
 						if c.last_value.generation() == min_generation {
 							mins += 1;
 							mini = i;
 						}
-						if c.address == address {
+						if c.address == recv_addr {
 							ci = Some(i);
 						}
 					}
 					if let Some(ci) = ci {
 						clients[ci].last_value.set((
 							f64::from_be_bytes(buf[..8].try_into().unwrap()),
-							time
+							recv_time
 						));
 
 						if mins == 1 && mini == ci {
@@ -153,7 +167,7 @@ impl LocationService {
 					let f = f64::from_be_bytes(buf[25..33].try_into().unwrap()); // TODO: ?
 
 					self.clients.lock().await.push(ClientInfo::new(
-						address,
+						recv_addr,
 						GenerationalValue::new_with_generation(
 							(NAN, start_time),
 							min_generation
@@ -161,14 +175,14 @@ impl LocationService {
 					));
 
 					let cam = PlacedCamera::new(
-							CameraInfo::new(f),
-							Coordinate::new(x, y),
-							r
+						CameraInfo::new(f),
+						Coordinate::new(x, y),
+						r
 					);
 					self.setup.write().await.cameras.push(cam);
 
 					for s in self.connection_subscriptions.read().await.iter() {
-						s(address, cam);
+						s(recv_addr, cam);
 					}
 				},
 

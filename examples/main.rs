@@ -1,10 +1,11 @@
 use camloc::{
     extrapolations::{LinearExtrapolation, Extrapolation},
-    service::{LocationService, Position},
+    service::{LocationService, Position, LocationServiceHandle},
     calc::PlacedCamera,
 };
 use std::time::Duration;
 use tokio::time::sleep;
+use ctrlc;
 
 fn main() {
     if let Err(e) = run() {
@@ -63,6 +64,8 @@ async fn run() -> Result<(), String> {
             .write_all(&buf[..]).await
             .expect("Couldn't write coords to stderr???");
     }
+
+    // let _ = ctrlc::set_handler(|| locations_service.stop_sync());
 
     if true {
         locations_service.subscribe(|p| {

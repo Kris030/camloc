@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+ctrlc = "3.2.5"
 tokio = { version = "1.25.0", features = [
 	"time", "net", "rt", "sync", "macros", "io-util", "io-std", "rt-multi-thread", "fs"
 ] }

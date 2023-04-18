@@ -16,7 +16,7 @@ loop
 			if all values updated
 				calculate new position
 				notify subscribers
-
+kill all clients [SEND 0xcd: u8] // "client die command"
 
 CAMLOC CLIENT
 
@@ -29,8 +29,8 @@ outer loop
 	connect to server
 		send connection request and camera info [SEND 0xcc: u8, x: f64, y: f64, rotation: f64, fov: f64] // "client connect"
 	inner loop
-		check for organizer command
-			if stop [RECV 0x0d: u8] // "organizer die command"
+		check for command
+			if stop [RECV 0xcd: u8] // "client die command"
 				break (inner)
 		find x value
 		send value to server [SEND value: f64]
@@ -56,4 +56,4 @@ loop
 			show image to user and prompt for camera info
 			send camera info and server ip [SEND x: f64, y: f64, rotation: f64, fov: f64, ip_len: u16, ip: [u8]]
 		if client stop
-			send stop [SEND 0x0d: u8] // "organizer die command"
+			send stop [SEND 0xcd: u8] // "client die command"

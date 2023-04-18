@@ -5,6 +5,7 @@ import java.io.FileInputStream;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.SocketAddress;
+import java.net.SocketTimeoutException;
 import java.util.ArrayList;
 import java.nio.ByteBuffer;
 import java.util.Iterator;
@@ -143,6 +144,8 @@ class Main {
 		Iterator<Vector2> positions = generator.genPoints();
 
 		try (var ds = new DatagramSocket()) {
+			ds.setSoTimeout(1);
+
 			byte[] buff = ByteBuffer.allocate(1 + 4 * 8)
 				.put((byte) 0xcc)
 				.putDouble(config.pos.x)
@@ -153,6 +156,14 @@ class Main {
 			ds.send(new DatagramPacket(buff, buff.length, config.serverAddress));
 
 			for (int i = 0; positions.hasNext(); i++) {
+				byte[] dpBuff = new byte[4];
+				var rec = new DatagramPacket(dpBuff, dpBuff.length);
+				try {
+					ds.receive(rec);
+					if (dpBuff[0] == (byte) 0xcd)
+						break;
+				} catch (SocketTimeoutException e) {}
+
 				Vector2 p = positions.next();
 
 				double d;
