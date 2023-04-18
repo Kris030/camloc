@@ -1,4 +1,5 @@
 #!/bin/bash
-cargo build --release --example main &&
-exec 3> >(java test/TestDisplay.java) &&
+cargo build --release -q --example main &&
+javac -d dump test/TestDisplay.java &&
+exec 3> >(java -cp dump TestDisplay) &&
 ./target/release/examples/main 2>&3

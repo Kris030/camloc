@@ -1,5 +1,5 @@
-use std::{sync::Arc, time::{Instant, Duration}, f64::NAN, fmt::{Debug, Display}, mem, net::SocketAddr, future::IntoFuture};
-use tokio::{net::UdpSocket, spawn, task::{JoinHandle}, sync::{RwLock, Mutex}};
+use std::{sync::Arc, time::{Instant, Duration}, f64::NAN, fmt::{Debug, Display}, mem, net::SocketAddr};
+use tokio::{net::UdpSocket, spawn, sync::{RwLock, Mutex}, task::JoinHandle};
 
 use crate::{calc::{Coordinate, Setup, PlacedCamera, CameraInfo}, extrapolations::Extrapolation, utils::GenerationalValue};
 
@@ -34,20 +34,11 @@ pub struct LocationServiceHandle {
 	service: Arc<LocationService>,
 }
 
-impl Clone for LocationServiceHandle {
-    fn clone(&self) -> Self {
-        Self {
-			service: self.service.clone(),
-			handle: self.handle.clone(),
-		}
-    }
-}
-
 impl Drop for LocationServiceHandle {
     fn drop(&mut self) {
 		let handle = mem::replace(&mut self.handle, None)
 			.expect("Handle should always be Some");
-
+		
 		let r = self.service.running.write();
 		let res = tokio::task::block_in_place(|| {
 			tokio::runtime::Handle::current().block_on(async {
@@ -110,9 +101,22 @@ impl LocationService {
 		let mut min_generation = 0;
 		let mut buf = [0u8; 64];
 
-		while *self.running.read().await {
-			let (recv_len, recv_addr) = udp_socket.recv_from(&mut buf).await
+		loop {
+			let r = self.running.read().await ;
+			if !*r {
+				break;
+			}
+			drop(r);
+
+			let Ok(recv_result) = tokio::time::timeout(
+				Duration::from_secs(1),
+				udp_socket.recv_from(&mut buf)
+			).await else {
+				continue;
+			};
+			let (recv_len, recv_addr) = recv_result
 				.map_err(|_| "Error while recieving")?;
+
 			let recv_time = Instant::now();
 
 			match recv_len {
@@ -189,6 +193,13 @@ impl LocationService {
 				_ => return Err("Recieved invalid number of bytes".to_string()),
 			}
 		}
+
+		for c in self.clients.lock().await.iter() {
+			udp_socket.send_to(&[0xcdu8], c.address).await
+				.map_err(|_| "Couldn't tell all clients to stop")?;
+		}
+
+		println!("Server shut down");
 
 		Ok(())
 	}
@@ -268,6 +279,13 @@ impl LocationServiceHandle {
 		} else {
 			Some(*pos)
 		}
+	}
+
+	pub async fn stop(self) {
+		drop(self)
+	}
+	pub async fn is_running(&self) -> bool {
+		*self.service.running.read().await
 	}
 }
 

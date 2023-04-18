@@ -1,11 +1,10 @@
 use camloc::{
     extrapolations::{LinearExtrapolation, Extrapolation},
-    service::{LocationService, Position, LocationServiceHandle},
+    service::{LocationService, Position},
     calc::PlacedCamera,
 };
+use tokio::{time::sleep, sync::oneshot::{Sender, Receiver, self}};
 use std::time::Duration;
-use tokio::time::sleep;
-use ctrlc;
 
 fn main() {
     if let Err(e) = run() {
@@ -35,7 +34,7 @@ async fn send_camera(address: String, camera: PlacedCamera) -> tokio::io::Result
 
 #[tokio::main]
 async fn run() -> Result<(), String> {
-    let locations_service = LocationService::start(
+    let location_service = LocationService::start(
         Some(
             Extrapolation::new::<LinearExtrapolation>(
                 Duration::from_millis(500)
@@ -43,7 +42,7 @@ async fn run() -> Result<(), String> {
         ), 1234
     ).await?;
 
-    locations_service.subscribe_connection(|address, camera| {
+    location_service.subscribe_connection(|address, camera| {
         let address = address.to_string();
         println!("New camera connected from {address}");
         tokio::spawn(async move { send_camera(address, camera).await });
@@ -65,24 +64,45 @@ async fn run() -> Result<(), String> {
             .expect("Couldn't write coords to stderr???");
     }
 
-    // let _ = ctrlc::set_handler(|| locations_service.stop_sync());
+    static mut CHAN: (Option<Sender<()>>, Option<Receiver<()>>) = (None, None);
+    unsafe {
+        let (rx, tx) = oneshot::channel();
+        CHAN = (Some(rx), Some(tx));
+    }
+    let mut rx = std::mem::replace(unsafe { &mut CHAN.1 }, None).unwrap();
+
+    fn ctrlc_handler() {
+        println!("ctrlc pressed");
+        let Some(tx) = std::mem::replace(unsafe { &mut CHAN.0 }, None) else {
+            return;
+        };
+
+        tx.send(()).unwrap();
+    }
+    let _ = ctrlc::set_handler(ctrlc_handler);
 
     if true {
-        locations_service.subscribe(|p| {
+        location_service.subscribe(|p| {
             tokio::spawn(write_to_stderr_binary(p));
         }).await;
-        sleep(Duration::from_secs(10000000)).await
+
+        rx.await.map_err(|_| "Something failed in the channel")?;
+        location_service.stop().await;
     } else {
-        let mut missing_positions = 0;
-        while missing_positions < 100 {
-            if let Some(p) = locations_service.get_position().await {
+        loop {
+            if let Some(p) = location_service.get_position().await {
                 write_to_stderr_binary(p).await;
-                missing_positions = 0;
             } else {
                 println!("Couldn't get position");
-                missing_positions += 1;
             }
-            sleep(Duration::from_millis(10)).await;
+
+            let rec = rx.try_recv();
+            use tokio::sync::oneshot::error::TryRecvError;
+            match rec {
+                Err(TryRecvError::Closed) => return Err("Channel closed???".to_string()),
+                Err(TryRecvError::Empty) => sleep(Duration::from_millis(10)).await,
+                Ok(()) => break,
+            }
         }
     }
 

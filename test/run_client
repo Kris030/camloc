@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 ms=${2:-50}
 
@@ -6,5 +6,6 @@ while true; do
 	clear
 	cargo r -q --release --example test_client_config_gen -- "../dump/conf$1" "$1" "$ms" &&
 		java TestClient.java "../dump/conf$1"
-	sleep 3
+	#
+	read -n 1 -s -r -p "Press any key to continue"
 done
