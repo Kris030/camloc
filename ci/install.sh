@@ -4,7 +4,7 @@ set -vex
 
 sudo apt-get update
 
-sudo apt-get install -y clang gcc-arm-linux-gnueabihf gcc libstc++ 
+sudo apt-get install -y clang gcc-arm-linux-gnueabihf gcc
 
 # sudo ln -fs libclang.so.1 /usr/lib/llvm-10/lib/libclang.so
 
