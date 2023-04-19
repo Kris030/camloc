@@ -139,6 +139,17 @@ pub fn calibrate(board: &CharucoBoard, delay: i32, filename: &str) -> opencv::Re
         est
     );
 
+    let mut k = core::Matx::default();
+    for i in 0..3 {
+        for j in 0..3 {
+            let v = k.get_mut((i, j)).unwrap();
+            *v = *camera_matrix.at_2d::<f64>(i as i32, j as i32).unwrap();
+        }
+    }
+    let cam = opencv::viz::Camera::new_2(k, image_size)?;
+    let fov = cam.get_fov()?;
+    println!("fov: {:?}", fov);
+
     let optimal_matrix = get_optimal_new_camera_matrix(
         &camera_matrix,
         &dist_coeffs,
@@ -170,7 +181,6 @@ pub fn save_camera_params(
     Ok(())
 }
 
-#[allow(unused)]
 pub fn load_camera_params(
     filename: &str,
     camera_matrix: &mut Mat,
