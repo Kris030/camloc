@@ -2,36 +2,62 @@ mod aruco;
 mod track;
 mod util;
 
-#[allow(unused)]
 use aruco::Aruco;
 use opencv::{highgui, prelude::*, videoio};
-// use std::io::Write;
-use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
-// use track::Tracking;
+use std::{
+    net::{SocketAddr, UdpSocket},
+    time::Duration,
+};
+use track::Tracking;
+
+use crate::aruco::detect;
 
 const PING: u8 = 0x0b;
-const PONG: u8 = 0xca;
+const PONG: u8 = 0xcf;
 const START: u8 = 0x60;
+const STOP: u8 = 0xcd;
+const CONNECT: u8 = 0xcc;
+const BUF_SIZE: usize = 6 * 8;
 
-#[allow(unused)]
 struct Config {
     x: f64,
     y: f64,
     rotation: f64,
     fov: f64,
+    server: SocketAddr,
 }
 
-// longest case -> x: f64, y: f64, rotation: f64, fov: f64
-const BUF_SIZE: usize = 4 * 8;
+impl Config {
+    fn to_be_bytes(&self) -> Vec<u8> {
+        vec![
+            CONNECT.to_be_bytes().as_slice(),
+            self.x.to_be_bytes().as_slice(),
+            self.y.to_be_bytes().as_slice(),
+            self.rotation.to_be_bytes().as_slice(),
+            self.fov.to_be_bytes().as_slice(),
+        ]
+        .concat()
+    }
 
-#[allow(unused)]
+    fn from_buffer(buf: &[u8]) -> Result<Self, Box<dyn std::error::Error>> {
+        let ip = String::from_utf8(buf[34..].to_vec())?;
+        Ok(Self {
+            x: f64::from_be_bytes(buf[0..7].try_into()?),
+            y: f64::from_be_bytes(buf[8..15].try_into()?),
+            rotation: f64::from_be_bytes(buf[16..23].try_into()?),
+            fov: f64::from_be_bytes(buf[24..31].try_into()?),
+            server: SocketAddr::new(ip.parse()?, 1234),
+        })
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     highgui::named_window("videocap", highgui::WINDOW_AUTOSIZE)?;
-    let mut cam = videoio::VideoCapture::new(0, videoio::CAP_ANY)?;
-    if !videoio::VideoCapture::is_opened(&cam)? {
-        panic!("camera index not found!");
-    }
     let mut frame = Mat::default();
+    let mut draw = Mat::default();
+    let mut aruco = Aruco::new(2)?;
+    let mut tracker = Tracking::new()?;
+    let mut has_object = false;
 
     let socket = UdpSocket::bind("0.0.0.0:1111")?;
     let mut buf: [u8; BUF_SIZE] = [(); BUF_SIZE].map(|_| 0);
@@ -53,66 +79,61 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         loop {
             socket.recv(&mut buf)?;
             if buf[0] == START {
-                cam.read(&mut frame)?;
-                socket.send_to(frame.data_bytes()?, organizer)?;
                 break;
             }
         }
 
-        // wait for organizer start
+        let mut cam = videoio::VideoCapture::new(0, videoio::CAP_ANY)?;
+        if !videoio::VideoCapture::is_opened(&cam)? {
+            panic!("camera index not found!");
+        }
+        cam.read(&mut frame)?;
+
+        let mut image_buffer = opencv::core::Vector::<u8>::new();
+        opencv::imgcodecs::imencode(
+            ".jpg",
+            &frame,
+            &mut image_buffer,
+            &opencv::core::Vector::new(),
+        )?;
+        socket.send_to(&image_buffer.as_slice(), organizer)?;
+
+        // recieve camera info and server ip
+        socket.recv(&mut buf)?;
+        let config = Config::from_buffer(&buf)?;
+
+        // connect to server
+        socket.send_to(&config.to_be_bytes(), config.server)?;
+        socket.set_read_timeout(Some(Duration::from_millis(1)))?;
+
         loop {
             socket.recv(&mut buf)?;
-            let config = Config {
-                x: f64::from_be_bytes(buf[0..7].try_into()?),
-                y: f64::from_be_bytes(buf[8..15].try_into()?),
-                rotation: f64::from_be_bytes(buf[16..23].try_into()?),
-                fov: f64::from_be_bytes(buf[24..31].try_into()?),
-            };
+            match buf[0] {
+                STOP => break,
+
+                PING => {
+                    socket.send_to(&[PONG], organizer)?;
+                }
+
+                _ => {
+                    if highgui::wait_key(10)? == 113 {
+                        break;
+                    }
+
+                    // find & send x value
+                    cam.read(&mut frame)?;
+                    let x = detect(
+                        &mut frame,
+                        Some(&mut draw),
+                        &mut has_object,
+                        &mut aruco,
+                        &mut tracker,
+                    )?;
+
+                    highgui::imshow("videocap", &draw)?;
+                    socket.send_to(&x.to_be_bytes(), config.server)?;
+                }
+            }
         }
     }
-
-    // let mut frame = Mat::default();
-    // let mut draw = Mat::default();
-
-    // let mut aruco = Aruco::new(2)?;
-    // let mut tracker = Tracking::new()?;
-    // let mut has_object = false;
-
-    // loop {
-    //     println!("Waiting for connections on {}", port);
-    //     let (mut tcp_stream, addr) = listener.accept()?;
-    //     println!("Connection received from {:?}", addr);
-
-    //     while highgui::wait_key(10)? != 113 {
-    //         cam.read(&mut frame)?;
-    //         if frame.size()?.width < 1 {
-    //             continue;
-    //         }
-    //         draw = frame.clone();
-    //         let mut final_x = f64::NAN;
-    //         // tracking logic
-    //         if !has_object {
-    //             if let Some(x) =
-    //                 aruco.detect(&mut frame, Some(&mut tracker.rect), Some(&mut draw))?
-    //             {
-    //                 final_x = x;
-    //                 has_object = true;
-    //                 tracker.init(&frame);
-    //             }
-    //         } else {
-    //             if let Some(x) = tracker.track(&frame, Some(&mut draw))? {
-    //                 final_x = x;
-    //             } else {
-    //                 has_object = false;
-    //             }
-    //         }
-
-    //         highgui::imshow("videocap", &draw)?;
-    //         if tcp_stream.write_all(&final_x.to_be_bytes()).is_err() {
-    //             break;
-    //         }
-    //     }
-    // }
-
-    Ok(())
 }

@@ -20,8 +20,7 @@ jobs:
             - name: Cache dependencies
               uses: actions/cache@v3
               with:
-                  path: ~/build
-                  key: src-4.7.0-ubuntu-latest
+                  path: ~/build/opencv
 
             - name: Install dependencies
               run: ci/install.sh

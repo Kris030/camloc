@@ -1,3 +1,4 @@
+use crate::track::Tracking;
 use crate::util::{self, Color};
 use opencv::{core, objdetect, prelude::*, types};
 
@@ -37,7 +38,7 @@ impl Aruco {
         frame: &mut Mat,
         rect: Option<&mut core::Rect>,
         draw: Option<&mut Mat>,
-    ) -> Result<Option<f64>, Box<dyn std::error::Error>> {
+    ) -> opencv::Result<Option<f64>> {
         self.detector.detect_markers(
             frame,
             &mut self.corners,
@@ -65,4 +66,29 @@ impl Aruco {
 
         Ok(Some(util::relative_x(&frame, center)))
     }
+}
+
+pub fn detect(
+    frame: &mut Mat,
+    draw: Option<&mut Mat>,
+    has_object: &mut bool,
+    aruco: &mut Aruco,
+    tracker: &mut Tracking,
+) -> opencv::Result<f64> {
+    let mut final_x = f64::NAN;
+    if !*has_object {
+        if let Some(x) = aruco.detect(frame, Some(&mut tracker.rect), draw)? {
+            final_x = x;
+            *has_object = true;
+            tracker.init(&frame)?;
+        }
+    } else {
+        if let Some(x) = tracker.track(&frame, draw)? {
+            final_x = x;
+        } else {
+            *has_object = false;
+        }
+    }
+
+    Ok(final_x)
 }

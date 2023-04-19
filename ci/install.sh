@@ -151,8 +151,11 @@ mkdir -p "$build_dir"
 
 pushd "$build_dir" > /dev/null
 
+install_dir="/usr"
+
 cmake $BUILD_FLAGS \
-	-D CMAKE_INSTALL_PREFIX=/usr \
+	-D DCMAKE_TOOLCHAIN_FILE=$base_dir/platforms/linux/arm-gnueabi.toolchain.cmake \
+	-D CMAKE_INSTALL_PREFIX=$install_dir \
 	-D OPENCV_EXTRA_MODULES_PATH="$base_dir/opencv_contrib-$OPENCV_VERSION/modules" \
 	"$base_dir/opencv-$OPENCV_VERSION"
 
