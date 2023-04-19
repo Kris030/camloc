@@ -159,9 +159,4 @@ cmake $BUILD_FLAGS \
 make -j"$(nproc)"
 sudo make -j"$(nproc)" install
 
-# OPENCV_LINK_LIBS="opencv_imgproc,opencv_face,opencv_objdetect,opencv_dnn,opencv_dnn_objdetect,opencv_core,ippiw,ittnotify,ippicv,liblibprotobuf,z" \
-# OPENCV_LINK_PATHS=/opt/opencv/lib,/opt/opencv/lib/opencv4/3rdparty,/usr/lib/x86_64-linux-gnu \
-# OPENCV_INCLUDE_PATHS=/opt/opencv/include/opencv4 \
-# cargo build --release
-
 popd > /dev/null
