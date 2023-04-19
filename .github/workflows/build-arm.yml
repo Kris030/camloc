@@ -1,36 +1,35 @@
 name: Rust
 
 on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-  workflow_dispatch:
+    push:
+        branches: ["main"]
+    pull_request:
+        branches: ["main"]
+    workflow_dispatch:
 
 env:
-  CARGO_TERM_COLOR: always
+    CARGO_TERM_COLOR: always
 
 jobs:
-  pleasebuild:
-    runs-on: ubuntu-latest
+    pleasebuild:
+        runs-on: ubuntu-latest
 
-    steps:
-      - uses: uraimo/run-on-arch-action@v2
-        name: Run commands
-        id: runcmd
-        with:
-          arch: armv7
-          distro: ubuntu18.04
-          run: |
-            uname -a
-            echo ::set-output name=uname::$(uname -a)
-      
-      - uses: Dovyski/setup-opencv-action@v1.1
-        with:
-          opencv-version: 4.7.0
-      
-      - uses: actions/checkout@v3
-      
-      - name: Build
-        run: cd calibration && cargo build --release --verbose
-  
+        steps:
+            - uses: actions/checkout@v3
+
+            - name: Cache dependencies
+              uses: actions/cache@v3
+              with:
+                  path: ~/build
+                  key: src-4.7.0-ubuntu-latest
+
+            - name: Install dependencies
+              run: ci/install.sh
+              shell: bash
+
+            - name: Install Rust
+              uses: dtolnay/rust-toolchain@stable
+
+            - name: Build project
+              run: ci/run.sh
+              shell: bash
