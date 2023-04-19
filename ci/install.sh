@@ -8,7 +8,7 @@ sudo apt-get install -y clang
 
 # sudo ln -fs libclang.so.1 /usr/lib/llvm-10/lib/libclang.so
 
-OPENCV_VERSION="4.7.0-static"
+OPENCV_VERSION="4.7.0"
 BUILD_FLAGS="-D BUILD_CUDA_STUBS=OFF
 	-D BUILD_DOCS=OFF
 	-D BUILD_EXAMPLES=OFF
