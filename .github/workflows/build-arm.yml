@@ -37,9 +37,9 @@ jobs:
                       ~/build
                   key: ${{ steps.restore-cache.outputs.cache-primary-key }}
 
-            - name: Install dependencies
-              run: sudo make -j"$(nproc)" install
-              shell: bash
+            # - name: Install dependencies
+            #   run: sudo make -j"$(nproc)" install
+            #   shell: bash
 
             - name: Install Rust
               uses: dtolnay/rust-toolchain@stable
