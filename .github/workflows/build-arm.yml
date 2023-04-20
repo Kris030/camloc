@@ -20,15 +20,18 @@ jobs:
             - name: Cache dependencies
               uses: actions/cache@v3
               with:
-                  path: ~/build/opencv
+                  path: ~/build
                   key: src-4.7.0-ubuntu-latest
 
             - name: Install dependencies
+              if: steps.cache.outputs.cache-hit != 'true'
               run: ci/install.sh
               shell: bash
 
             - name: Install Rust
               uses: dtolnay/rust-toolchain@stable
+              with:
+                  targets: armv7-unknown-linux-gnueabihf
 
             - name: Build project
               run: ci/run.sh
