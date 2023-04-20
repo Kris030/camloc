@@ -23,7 +23,7 @@ jobs:
               with:
                   path: |
                       ~/build
-                  key: src-4.7.0-ubuntu-latest
+                  key: src-4.7.0-ubuntu-latesta
 
             - name: Build dependencies
               if: steps.cache.outputs.cache-hit != 'true'
