@@ -62,7 +62,7 @@ impl LocationService {
 	) -> Result<LocationServiceHandle, String> {
 		let start_time = Instant::now();
 
-		let udp_socket = UdpSocket::bind(("127.0.0.1", port)).await
+		let udp_socket = UdpSocket::bind(("0.0.0.0", port)).await
 			.map_err(|_| "Couldn't create socket")?;
 
 		let instance = LocationService {
@@ -168,7 +168,7 @@ impl LocationService {
 					let x = f64::from_be_bytes(buf[1..9].try_into().unwrap());
 					let y = f64::from_be_bytes(buf[9..17].try_into().unwrap());
 					let r = f64::from_be_bytes(buf[17..25].try_into().unwrap());
-					let f = f64::from_be_bytes(buf[25..33].try_into().unwrap()); // TODO: ?
+					let f = f64::from_be_bytes(buf[25..33].try_into().unwrap());
 
 					self.clients.lock().await.push(ClientInfo::new(
 						recv_addr,
