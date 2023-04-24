@@ -1,8 +1,10 @@
 mod scanning;
+mod utils;
+mod info;
 
 use network_interface::{NetworkInterfaceConfig, NetworkInterface, Addr};
-use scanning::IPV4AddressTemplate;
-use std::{io::{stdin, Write}, net::{IpAddr, Ipv6Addr, UdpSocket}};
+use std::{net::{IpAddr, UdpSocket}, time::{Duration, Instant}};
+use info::{ServerStatus, ClientStatus, Host, HostStatus};
 
 fn get_own_ip() -> Result<Addr, String> {
     let nis = NetworkInterface::show()
@@ -24,15 +26,7 @@ fn get_own_ip() -> Result<Addr, String> {
         }
     }
 
-    print!("\nEnter ip index: ");
-    std::io::stdout().flush().unwrap();
-
-    let mut l = String::new();
-    stdin().read_line(&mut l)
-        .map_err(|_| "Couldn't get line")?;
-
-    let ai: usize = l[..(l.len() - 1)].parse()
-        .map_err(|_| "Invalid index")?;
+    let ai: usize = utils::get_from_stdin("\nEnter ip index: ")?;
 
     rnis.get(ai - 1)
         .copied()
@@ -40,48 +34,169 @@ fn get_own_ip() -> Result<Addr, String> {
 }
 
 fn main() -> Result<(), String> {
-    const port: u16 = 1111;
-
     let own_ip = get_own_ip()?;
-    println!("{}", own_ip.ip());
+    println!("Selected {}\n", own_ip.ip());
 
-    let mut clients = vec![];
-    let sock = UdpSocket::bind(("0.0.0.0", port))
+    let mut hosts = vec![];
+    let sock = UdpSocket::bind(("0.0.0.0", 0))
         .map_err(|_| "Couldn't create socket")?;
 
     loop {
-        scan(&sock, own_ip, &mut clients)?;
-        handle_commands(&sock, &mut clients)?;
+        scan(&sock, own_ip, &mut hosts)?;
+        handle_commands(&sock, &mut hosts)?;
     }
 }
 
-fn handle_commands(sock: &UdpSocket, clients: &mut Vec<Client>) -> Result<(), String> {
-    todo!()
+fn handle_commands(sock: &UdpSocket, hosts: &mut Vec<Host>) -> Result<(), String> {
+    match utils::get_from_stdin::<usize>("Enter command: start (0) / stop (1) client: ")? {
+        0 => start_client(sock, hosts),
+        1 =>  stop_client(sock, hosts),
+        _ => Ok(())
+    }
 }
 
-struct Client {
+fn start_client(sock: &UdpSocket, hosts: &mut[Host]) -> Result<(), String> {
+    let server = match utils::get_server(hosts) {
+        Ok(s) => s,
+        Err(count) => {
+            println!("{count} servers running, resolve first");
+            return Ok(());
+        }
+    };
+    let server_ip = server.ip.to_string();
 
+    let options = utils::print_hosts(hosts, |s| matches!(s, HostStatus::Client(ClientStatus::Idle)));
+
+    let selected: usize = utils::get_from_stdin("\nSelect client to start: ")?;
+    let host = &mut hosts[options[selected]];
+
+    let addr = (host.ip, TARGET_PORT);
+    sock.send_to(START_CLIENT, addr)
+        .map_err(|_| "Couldn't send client start")?;
+
+    // TODO: recieve image + calibrate
+    let (x, y, rotation, fov) = (0f64, 0f64, 0f64, 0f64);
+
+    let ip_bytes = server_ip.as_bytes();
+    let ip_len = ip_bytes.len() as u16;
+
+    let buff = [
+        x.to_be_bytes().as_slice(),
+        y.to_be_bytes().as_slice(),
+        rotation.to_be_bytes().as_slice(),
+        fov.to_be_bytes().as_slice(),
+        ip_len.to_be_bytes().as_slice(),
+        ip_bytes,
+    ].concat();
+
+    sock.send_to(&buff, addr)
+        .map_err(|_| "Couldn't send position info and server address")?;
+
+    Ok(())
 }
 
-fn scan(sock: &UdpSocket, own_ip: Addr, clients: &mut Vec<Client>) -> Result<(), String> {
+fn stop_client(sock: &UdpSocket, hosts: &mut Vec<Host>) -> Result<(), String> {
+    let options = utils::print_hosts(hosts, |s| matches!(s, HostStatus::Client(ClientStatus::Running)));
+
+    let selected: usize = utils::get_from_stdin("\nSelect client to start: ")?;
+    let host = options[selected];
+
+    let addr = (hosts[host].ip, TARGET_PORT);
+    sock.send_to(STOP_CLIENT, addr)
+        .map_err(|_| "Couldn't send client start")?;
+
+    hosts.remove(host);
+
+    Ok(())
+}
+
+fn scan(sock: &UdpSocket, own_ip: Addr, hosts: &mut Vec<Host>) -> Result<(), String> {
+    println!("Scanning...");
     let IpAddr::V4(ip) = own_ip.ip() else {
         unreachable!()
     };
     
-    if let Some(broadcast) = own_ip.broadcast() {
-        scan_with_broadcast(sock, clients, broadcast)
-    } else {
-        let netmask = own_ip.netmask()
-            .expect("No netmask");
-        scan_with_netmask(sock, clients, ip, netmask)
+    let set_broadcast = sock.set_broadcast(true).is_ok();
+
+    sock.set_read_timeout(Some(TIMEOUT_DURATION))
+        .map_err(|_| "Couldn't set timeout")?;
+
+    match own_ip.broadcast() {
+        Some(broadcast) if set_broadcast => scan_with_broadcast(sock, hosts, broadcast),
+        _ => scan_with_netmask(sock, hosts, ip, own_ip.netmask().expect("No netmask"))
     }
 }
 
-fn scan_with_netmask(sock: &UdpSocket, clients: &[Client], ip: std::net::Ipv4Addr, netmask: IpAddr) -> Result<(), String> {
+#[allow(unused, clippy::ptr_arg)]
+fn scan_with_netmask(sock: &UdpSocket, info: &mut Vec<Host>, ip: std::net::Ipv4Addr, netmask: IpAddr) -> Result<(), String> {
     todo!()
 }
 
-fn scan_with_broadcast(sock: &UdpSocket, clients: &[Client], broadcast: IpAddr) -> Result<(), String> {
-    todo!()
+fn scan_with_broadcast(sock: &UdpSocket, hosts: &mut Vec<Host>, broadcast: IpAddr) -> Result<(), String> {
+    sock.send_to(PING, (broadcast, TARGET_PORT))
+        .map_err(|_| "Couldn't send ping")?;
+
+    let till = Instant::now() + WAIT_DURATION;
+    let mut buff = [0; 64];
+
+    let mut hit_hosts = vec![false; hosts.len()];
+
+    'loopy: while Instant::now() < till {
+        let Ok((msg_len, addr)) = sock.recv_from(&mut buff) else {
+            continue;
+        };
+        if msg_len != 1 {
+            continue;
+        }
+
+        let ip = addr.ip();
+        let new = 'blocky: {
+            for (h, hit) in hosts.iter_mut().zip(hit_hosts.iter_mut()) {
+                if h.ip != ip {
+                    continue;
+                }
+
+                *hit = true;
+                
+                h.status = match buff[0] {
+                    SERVER_ANSWER => HostStatus::Server(ServerStatus::Running),
+                    CLIENT_ACTIVE => HostStatus::Client(ClientStatus::Running),
+                    CLIENT_IDLE   => HostStatus::Client(ClientStatus::Idle),
+        
+                    _ => continue 'loopy,
+                };
+
+                break 'blocky false;
+            }
+            true
+        };
+        if new {
+            hosts.push(Host { status: HostStatus::Server(ServerStatus::Running), ip });
+        }
+    }
+
+    for (h, hit) in hosts.iter_mut().zip(hit_hosts.iter()) {
+        if *hit {
+            continue;
+        }
+        h.status = match h.status {
+            HostStatus::Client(_) => HostStatus::Client(ClientStatus::Unreachable),
+            HostStatus::Server(_) => HostStatus::Server(ServerStatus::Unreachable),
+        };
+    }
+
+    Ok(())
 }
 
+const TIMEOUT_DURATION: Duration = Duration::from_millis(500);
+const WAIT_DURATION: Duration = Duration::from_millis(TIMEOUT_DURATION.as_millis() as u64 * 4);
+
+const TARGET_PORT: u16 = 1111;
+
+const PING:         &[u8] = &[0x0b];
+const START_CLIENT: &[u8] = &[0x60];
+const STOP_CLIENT:  &[u8] = &[0xcd];
+
+const SERVER_ANSWER: u8 = 0x5a;
+const CLIENT_ACTIVE: u8 = 0xca;
+const CLIENT_IDLE:   u8 = 0xcf;
