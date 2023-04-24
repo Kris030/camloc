@@ -1,18 +1,18 @@
 use opencv::{
-    core::Size,
-    imgcodecs,
     objdetect::{self, CharucoBoard},
     prelude::*,
+    imgcodecs,
+    core,
 };
 
 pub fn generate_board(width: i32, height: i32) -> opencv::Result<CharucoBoard> {
-    Ok(CharucoBoard::new(
-        Size { width, height },
+    CharucoBoard::new(
+        core::Size { width, height },
         0.04,
         0.02,
         &objdetect::get_predefined_dictionary(objdetect::PredefinedDictionaryType::DICT_4X4_50)?,
-        &opencv::core::no_array(),
-    )?)
+        &core::no_array(),
+    )
 }
 
 pub fn export_board(
@@ -24,7 +24,7 @@ pub fn export_board(
     let mut img = Mat::default();
     let size = board.get_chessboard_size()?;
     board.generate_image(
-        Size {
+        core::Size {
             width: size.width * res,
             height: size.height * res,
         },
@@ -32,7 +32,7 @@ pub fn export_board(
         margin,
         1,
     )?;
-    imgcodecs::imwrite(name.as_str(), &img, &opencv::core::Vector::<i32>::default())?;
-    println!("board successfully exported to `{}`", name);
+    imgcodecs::imwrite(name.as_str(), &img, &core::Vector::<i32>::default())?;
+    println!("board successfully exported to `{name}`");
     Ok(())
 }

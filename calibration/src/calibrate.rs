@@ -1,8 +1,13 @@
-use opencv::calib3d::get_optimal_new_camera_matrix;
-use opencv::core::FileStorage;
-use opencv::objdetect::{self, CharucoDetector, CharucoParameters};
-use opencv::{aruco::calibrate_camera_charuco, core::TermCriteria, types::PtrOfCharucoBoard};
-use opencv::{core, highgui, objdetect::CharucoBoard, prelude::*, types, videoio};
+use opencv::{
+    objdetect::{self, CharucoDetector, CharucoParameters, CharucoBoard},
+    core::{self, FileStorage, TermCriteria},
+    calib3d::get_optimal_new_camera_matrix, 
+    aruco::calibrate_camera_charuco,
+    prelude::*,
+    highgui,
+    videoio,
+    types,
+};
 
 fn detect_boards(
     board: &CharucoBoard,
@@ -62,7 +67,7 @@ fn detect_boards(
         )?;
 
         // requires at least one detectable marker
-        if marker_ids.len() == 0 {
+        if marker_ids.is_empty() {
             continue;
         }
 
@@ -75,7 +80,7 @@ fn detect_boards(
             &mut marker_ids,
         )?;
 
-        if charuco_ids.len() == 0 {
+        if charuco_ids.is_empty() {
             continue;
         }
 
@@ -120,7 +125,7 @@ pub fn calibrate(board: &CharucoBoard, delay: i32, filename: &str) -> opencv::Re
     let mut tvecs = types::VectorOfMat::new();
     let flags = 0;
 
-    let board = PtrOfCharucoBoard::new(board.clone());
+    let board = types::PtrOfCharucoBoard::new(board.clone());
     let est = calibrate_camera_charuco(
         &charuco_corners,
         &charuco_ids,
@@ -134,21 +139,7 @@ pub fn calibrate(board: &CharucoBoard, delay: i32, filename: &str) -> opencv::Re
         TermCriteria::default()?,
     )?;
 
-    println!(
-        "calibration finished\nestimated calibration error: {:.3}",
-        est
-    );
-
-    // let mut k = core::Matx::default();
-    // for i in 0..3 {
-    //     for j in 0..3 {
-    //         let v = k.get_mut((i, j)).unwrap();
-    //         *v = *camera_matrix.at_2d::<f64>(i as i32, j as i32).unwrap();
-    //     }
-    // }
-    // let cam = opencv::viz::Camera::new_2(k, image_size)?;
-    // let fov = cam.get_fov()?;
-    // println!("fov: {:?}", fov);
+    println!("calibration finished\nestimated calibration error: {est:.3}");
 
     let optimal_matrix = get_optimal_new_camera_matrix(
         &camera_matrix,

@@ -27,10 +27,10 @@ pub trait Center {
 
 impl Center for core::Rect {
     fn center(&self) -> core::Point2i {
-        return core::Point2i {
+        core::Point2i {
             x: self.x + (self.width / 2),
             y: self.y + (self.height / 2),
-        };
+        }
     }
 }
 
@@ -44,7 +44,10 @@ pub fn draw_bounds(
     }
 
     let mut vec = bounding.to_vec();
-    vec.push(vec.first().unwrap().clone());
+    vec.push(
+        *vec.first()
+            .ok_or(opencv::Error::new(core::StsVecLengthErr, "Wut du heell?"))?
+    );
     for p in vec.windows(2) {
         imgproc::line(
             frame,
@@ -85,22 +88,22 @@ pub fn draw_x(frame: &mut Mat, p: core::Point2i, c: Color) -> opencv::Result<()>
 pub fn avg_corners(bounding: &types::VectorOfPoint2f) -> core::Point2i {
     return core::Point2i::new(
         (bounding.iter().map(|s| s.x).sum::<f32>() / bounding.len() as f32).round() as i32,
-        (bounding.iter().map(|s| s.y).sum::<f32>() as f32 / bounding.len() as f32).round() as i32,
+        (bounding.iter().map(|s| s.y).sum::<f32>() / bounding.len() as f32).round() as i32,
     );
 }
 
-pub fn bounding_to_rect(bounding: &types::VectorOfPoint2f, offset: i32) -> core::Rect2i {
-    let sx = bounding.iter().map(|s| s.x as i32).min().unwrap();
-    let sy = bounding.iter().map(|s| s.y as i32).min().unwrap();
-    let ex = bounding.iter().map(|s| s.x as i32).max().unwrap();
-    let ey = bounding.iter().map(|s| s.y as i32).max().unwrap();
+pub fn bounding_to_rect(bounding: &types::VectorOfPoint2f, offset: i32) -> Option<core::Rect2i> {
+    let sx = bounding.iter().map(|s| s.x as i32).min()?;
+    let sy = bounding.iter().map(|s| s.y as i32).min()?;
+    let ex = bounding.iter().map(|s| s.x as i32).max()?;
+    let ey = bounding.iter().map(|s| s.y as i32).max()?;
 
-    core::Rect2i::new(
+    Some(core::Rect2i::new(
         sx - offset,
         sy - offset,
         (sx - ex).abs() + (2 * offset),
         (sy - ey).abs() + (2 * offset),
-    )
+    ))
 }
 
 pub fn rect(frame: &mut Mat, rect: core::Rect2i, c: Color) -> opencv::Result<()> {
@@ -109,5 +112,5 @@ pub fn rect(frame: &mut Mat, rect: core::Rect2i, c: Color) -> opencv::Result<()>
 }
 
 pub fn relative_x(frame: &Mat, point: core::Point2i) -> f64 {
-    return point.x as f64 / frame.size().unwrap().width as f64;
+    point.x as f64 / frame.size().expect("No frame size???").width as f64
 }

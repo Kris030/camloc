@@ -24,7 +24,7 @@ impl Tracking {
     /// creates a new `TrackerKCF` struct (because calling `init` on the same instance causes segfaults for whatever reason)
     fn reinit(frame: &Mat, rect: Rect) -> opencv::Result<Ptr<dyn tracking::TrackerKCF>> {
         let mut tracker =
-            <dyn tracking::TrackerKCF>::create(tracking::TrackerKCF_Params::default().unwrap())?;
+            <dyn tracking::TrackerKCF>::create(tracking::TrackerKCF_Params::default()?)?;
         if !rect.empty() {
             tracker.init(frame, rect)?;
         }

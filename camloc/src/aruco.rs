@@ -50,9 +50,10 @@ impl Aruco {
             return Ok(None);
         };
 
-        let bounding = self.corners.get(index).unwrap();
+        let bounding = self.corners.get(index)?;
         let center = util::avg_corners(&bounding);
-        let brect = util::bounding_to_rect(&bounding, 0);
+        let brect = util::bounding_to_rect(&bounding, 0)
+            .expect("No bounding rect?");
 
         if let Some(rect) = rect {
             rect.clone_from(&brect);
@@ -64,7 +65,7 @@ impl Aruco {
             util::rect(draw, brect, Color::Yellow)?;
         }
 
-        Ok(Some(util::relative_x(&frame, center)))
+        Ok(Some(util::relative_x(frame, center)))
     }
 }
 
@@ -80,14 +81,12 @@ pub fn detect(
         if let Some(x) = aruco.detect(frame, Some(&mut tracker.rect), draw)? {
             final_x = x;
             *has_object = true;
-            tracker.init(&frame)?;
+            tracker.init(frame)?;
         }
+    } else if let Some(x) = tracker.track(frame, draw)? {
+        final_x = x;
     } else {
-        if let Some(x) = tracker.track(&frame, draw)? {
-            final_x = x;
-        } else {
-            *has_object = false;
-        }
+        *has_object = false;
     }
 
     Ok(final_x)

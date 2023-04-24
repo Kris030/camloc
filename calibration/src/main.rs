@@ -4,10 +4,10 @@ mod selfies;
 
 use crate::generate::export_board;
 
-use calibrate::calibrate;
-use clap::Parser;
 use generate::generate_board;
 use selfies::take_samples;
+use calibrate::calibrate;
+use clap::Parser;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]

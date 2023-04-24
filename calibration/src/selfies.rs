@@ -48,16 +48,15 @@ pub fn take_samples(filename: Option<String>) -> opencv::Result<()> {
             // space
             32 => {
                 imgcodecs::imwrite(
-                    format!("img-{:0>3}.jpg", index).as_str(),
+                    format!("img-{index:0>3}.jpg").as_str(),
                     &frame,
                     &opencv::core::Vector::<i32>::default(),
                 )?;
 
-                println!("image saved to `img-{:0>3}.jpg`", index);
+                println!("image saved to `img-{index:0>3}.jpg`");
                 index += 1;
             }
             _ => (),
-            // k => println!("{}", k),
         }
     }
 
