@@ -11,6 +11,10 @@ pub(crate) fn get_from_stdin<T: FromStr>(prompt: &str) -> Result<T, &'static str
     stdin().read_line(&mut l)
         .map_err(|_| "Couldn't get line")?;
 
+    if l.len() == 1 {
+        return Err("Empty");
+    }
+
     l[..(l.len() - 1)].parse()
         .map_err(|_| "Invalid index")
 }
@@ -40,6 +44,8 @@ pub(crate) fn print_hosts<F: FnMut(&HostStatus) -> bool>(hosts: &mut [Host], mut
             ret.push(j);
         }
     }
+
+    println!();
 
     ret
 }

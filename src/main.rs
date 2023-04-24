@@ -10,10 +10,10 @@ fn get_own_ip() -> Result<Addr, String> {
     let nis = NetworkInterface::show()
         .map_err(|_| "Couldn't get network interfaces")?;
     let mut rnis = vec![];
-
+    println!("Interfaces and addresses:");
     let mut ai = 0;
     for n in &nis {
-        println!("Interface {}", n.name);
+        println!("{}", n.name);
         for a in &n.addr {
             let ip = a.ip();
             if !ip.is_ipv4() {
@@ -21,14 +21,14 @@ fn get_own_ip() -> Result<Addr, String> {
             }
 
             rnis.push(*a);
-            ai += 1;
             println!("{ai:<3}{ip}");
+            ai += 1;
         }
     }
 
     let ai: usize = utils::get_from_stdin("\nEnter ip index: ")?;
 
-    rnis.get(ai - 1)
+    rnis.get(ai)
         .copied()
         .ok_or("Invalid index".to_string())
 }
@@ -48,11 +48,15 @@ fn main() -> Result<(), String> {
 }
 
 fn handle_commands(sock: &UdpSocket, hosts: &mut Vec<Host>) -> Result<(), String> {
-    match utils::get_from_stdin::<usize>("Enter command: start (0) / stop (1) client: ")? {
-        0 => start_client(sock, hosts),
-        1 =>  stop_client(sock, hosts),
-        _ => Ok(())
+    let get_from_stdin: usize = utils::get_from_stdin("Enter command: start (0) / stop (1) client: ")?;
+    println!();
+    match get_from_stdin {
+        0 => start_client(sock, hosts)?,
+        1 =>  stop_client(sock, hosts)?,
+        _ => (),
     }
+    println!();
+    Ok(())
 }
 
 fn start_client(sock: &UdpSocket, hosts: &mut[Host]) -> Result<(), String> {
@@ -66,9 +70,15 @@ fn start_client(sock: &UdpSocket, hosts: &mut[Host]) -> Result<(), String> {
     let server_ip = server.ip.to_string();
 
     let options = utils::print_hosts(hosts, |s| matches!(s, HostStatus::Client(ClientStatus::Idle)));
+    if options.is_empty() {
+        println!("No clients found");
+        return Ok(());
+    }
 
     let selected: usize = utils::get_from_stdin("\nSelect client to start: ")?;
-    let host = &mut hosts[options[selected]];
+    let host_index = *options.get(selected)
+        .ok_or("No such index")?;
+    let host = &mut hosts[host_index];
 
     let addr = (host.ip, TARGET_PORT);
     sock.send_to(START_CLIENT, addr)
@@ -111,7 +121,7 @@ fn stop_client(sock: &UdpSocket, hosts: &mut Vec<Host>) -> Result<(), String> {
 }
 
 fn scan(sock: &UdpSocket, own_ip: Addr, hosts: &mut Vec<Host>) -> Result<(), String> {
-    println!("Scanning...");
+    println!("Scanning...\n");
     let IpAddr::V4(ip) = own_ip.ip() else {
         unreachable!()
     };
@@ -150,6 +160,14 @@ fn scan_with_broadcast(sock: &UdpSocket, hosts: &mut Vec<Host>, broadcast: IpAdd
         }
 
         let ip = addr.ip();
+        let status = match buff[0] {
+            SERVER_ANSWER => HostStatus::Server(ServerStatus::Running),
+            CLIENT_ACTIVE => HostStatus::Client(ClientStatus::Running),
+            CLIENT_IDLE   => HostStatus::Client(ClientStatus::Idle),
+
+            _ => continue 'loopy,
+        };
+
         let new = 'blocky: {
             for (h, hit) in hosts.iter_mut().zip(hit_hosts.iter_mut()) {
                 if h.ip != ip {
@@ -157,21 +175,13 @@ fn scan_with_broadcast(sock: &UdpSocket, hosts: &mut Vec<Host>, broadcast: IpAdd
                 }
 
                 *hit = true;
-                
-                h.status = match buff[0] {
-                    SERVER_ANSWER => HostStatus::Server(ServerStatus::Running),
-                    CLIENT_ACTIVE => HostStatus::Client(ClientStatus::Running),
-                    CLIENT_IDLE   => HostStatus::Client(ClientStatus::Idle),
-        
-                    _ => continue 'loopy,
-                };
-
+                h.status = status.clone();
                 break 'blocky false;
             }
             true
         };
         if new {
-            hosts.push(Host { status: HostStatus::Server(ServerStatus::Running), ip });
+            hosts.push(Host { status, ip });
         }
     }
 
