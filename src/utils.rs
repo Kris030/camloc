@@ -1,23 +1,5 @@
-use std::{io::{stdin, Write}, str::FromStr};
-
-use crate::info::{HostStatus, Host, ServerStatus};
-
-pub(crate) fn get_from_stdin<T: FromStr>(prompt: &str) -> Result<T, &'static str> {
-    
-    print!("{prompt}");
-    std::io::stdout().flush().unwrap();
-
-    let mut l = String::new();
-    stdin().read_line(&mut l)
-        .map_err(|_| "Couldn't get line")?;
-
-    if l.len() == 1 {
-        return Err("Empty");
-    }
-
-    l[..(l.len() - 1)].parse()
-        .map_err(|_| "Invalid index")
-}
+use camloc_common::hosts::{HostStatus, ServerStatus};
+use crate::Host;
 
 pub(crate) fn print_hosts<F: FnMut(&HostStatus) -> bool>(hosts: &mut [Host], mut filter: F) -> Vec<usize> {
     println!("Available hosts");
@@ -36,8 +18,15 @@ pub(crate) fn print_hosts<F: FnMut(&HostStatus) -> bool>(hosts: &mut [Host], mut
         }
 
         match &h.status {
-            HostStatus::Client(_) => println!("CLIENT {ip}"),
-            HostStatus::Server(_) => println!("SERVER {ip}"),
+            HostStatus::Client { calibrated, .. } => {
+                print!("CLIENT {ip}{}", if *calibrated {
+                    " CALIBRATED"
+                } else {
+                    ""
+                });
+            },
+            HostStatus::ConfiglessClient(_) => println!("PHONE  {ip}"),
+            HostStatus::Server(_)           => println!("SERVER {ip}"),
         }
 
         if fres {

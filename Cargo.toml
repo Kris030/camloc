@@ -4,4 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+# TODO: camloc_common = { git = "https://github.com/Kris030/camloc_common" }
+camloc_common = { path = "../common" }
 network-interface = "1.0.0"
+opencv = "0.80.0"

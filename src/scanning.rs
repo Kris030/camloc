@@ -22,7 +22,7 @@ impl<T: Clone, U: From<T>> From<TemplateMember<T>> for RangeInclusive<U> {
 pub struct IPV4AddressTemplate {
     template: [RangeInclusive<usize>; 5],
 }
-// TODO: proc macro to create from string
+
 impl IPV4AddressTemplate {
     pub fn new(template: [TemplateMember<u8>; 4], port: TemplateMember<u16>) -> Self {
 		Self {
