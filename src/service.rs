@@ -63,7 +63,7 @@ impl LocationService {
 	) -> Result<LocationServiceHandle, String> {
 		let start_time = Instant::now();
 
-		let udp_socket = UdpSocket::bind(("127.0.0.1", port)).await
+		let udp_socket = UdpSocket::bind(("0.0.0.0", port)).await
 			.map_err(|_| "Couldn't create socket")?;
 
 		let instance = LocationService {
