@@ -1,9 +1,11 @@
 NOTICE
 
-values are all big-endian
+- values are all big-endian
+- for constants see common/HostStatus
 
+TODO: update
 
-CAMLOC SERVER
+SERVER
 
 loop
 	recieve message
@@ -18,13 +20,13 @@ loop
 				notify subscribers
 kill all clients [SEND 0xcd: u8] // "client die command"
 
-CAMLOC CLIENT
+CLIENT
 
 outer loop
 	wait for organizer ping [RECV 0x0b: u8] // "organizer bonk"
 	reply with pong [SEND 0xcf: u8] // "client fucking around"
 	wait for organizer start [RECV 0x60: u8] // "go"
-	send image from camera // [SEND TODO]
+	send image from camera // [SEND len: u64, img: [u8]]
 	recieve camera info and server ip [RECV x: f64, y: f64, rotation: f64, fov: f64, ip_len: u16, ip: [u8]]
 	connect to server
 		send connection request and camera info [SEND 0xcc: u8, x: f64, y: f64, rotation: f64, fov: f64] // "client connect"
@@ -38,7 +40,22 @@ outer loop
 		send value to server [SEND value: f64]
 
 
-CAMLOC ORGANIZER
+NOCONFIG CLIENT
+	wait for organizer ping [RECV 0x0b: u8] // "organizer bonk"
+	reply with pong [SEND 0xcf: u8] // "client fucking around"
+	wait for organizer start [RECV 0x60: u8] // "go"
+	connect to server
+		send connection request and camera info [SEND 0xcc: u8, x: f64, y: f64, rotation: f64, fov: f64] // "client connect"
+	inner loop
+		check for command
+			if stop [RECV 0xcd: u8] // "client die command"
+				break (inner)
+			if organizer ping [RECV 0x0b: u8] // "organizer bonk"
+				reply with pong [SEND 0xca: u8] // "client active"
+		find x value
+		send value to server [SEND value: f64]
+
+ORGANIZER
 
 thread 1
 	loop through ips

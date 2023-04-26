@@ -1,4 +1,4 @@
-use camloc::calc::{Setup, CameraInfo};
+use camloc_server::calc::{Setup, CameraInfo};
 
 fn main() {
 	let args: Vec<String> = std::env::args()
@@ -24,9 +24,9 @@ fn main() {
 		server_addr.as_bytes().to_vec(),
 		i32::to_be_bytes(port).to_vec(),
 
-		f64::to_be_bytes(cam.pos.x).to_vec(),
-		f64::to_be_bytes(cam.pos.y).to_vec(),
-		f64::to_be_bytes(cam.rot).to_vec(),
+		f64::to_be_bytes(cam.position.x).to_vec(),
+		f64::to_be_bytes(cam.position.y).to_vec(),
+		f64::to_be_bytes(cam.position.rotation).to_vec(),
 		f64::to_be_bytes(cam.info.fov).to_vec(),
 
 		i64::to_be_bytes(ms).to_vec(),

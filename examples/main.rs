@@ -1,6 +1,6 @@
-use camloc::{
+use camloc_server::{
     extrapolations::{LinearExtrapolation, Extrapolation},
-    service::{LocationService, Position},
+    service::{LocationService, TimedPosition},
     calc::PlacedCamera,
 };
 use tokio::{time::sleep, sync::oneshot::{Sender, Receiver, self}};
@@ -23,9 +23,9 @@ async fn send_camera(address: String, camera: PlacedCamera) -> tokio::io::Result
     se.write_u16(address.len() as u16).await?;
     se.write_all(address.as_bytes()).await?;
 
-    se.write_f64(camera.pos.x).await?;
-    se.write_f64(camera.pos.y).await?;
-    se.write_f64(camera.rot).await?;
+    se.write_f64(camera.position.x).await?;
+    se.write_f64(camera.position.y).await?;
+    se.write_f64(camera.position.rotation).await?;
 
     se.write_f64(camera.info.fov).await?;
 
@@ -48,15 +48,15 @@ async fn run() -> Result<(), String> {
         tokio::spawn(async move { send_camera(address, camera).await });
     }).await;
 
-    async fn write_to_stderr_binary(p: Position) {
+    async fn write_to_stderr_binary(p: TimedPosition) {
         use tokio::io::{stderr, AsyncWriteExt};
 
         println!("{p}");
 
         let mut buf = 0i32.to_be_bytes().to_vec();
         buf.append(&mut [
-            p.coordinates.x.to_be_bytes(),
-            p.coordinates.y.to_be_bytes(),
+            p.position.x.to_be_bytes(),
+            p.position.y.to_be_bytes(),
         ].concat());
 
         stderr()

@@ -1,28 +1,5 @@
-use std::{collections::HashMap, fmt::Display};
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Coordinate {
-    pub x: f64,
-    pub y: f64,
-}
-
-impl Coordinate {
-    pub const fn new(x: f64, y: f64) -> Self {
-        Coordinate { x, y }
-    }
-}
-
-impl From<(f64, f64)> for Coordinate {
-    fn from((x, y): (f64, f64)) -> Self {
-        Self::new(x, y)
-    }
-}
-
-impl Display for Coordinate {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "({:.2}; {:.2})", self.x, self.y)
-    }
-}
+use camloc_common::position::Position;
+use std::collections::HashMap;
 
 /// Physical characteristics of a camera
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -41,15 +18,12 @@ impl CameraInfo {
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub struct PlacedCamera {
     pub info: CameraInfo,
-    pub pos: Coordinate,
-
-    /// **IN RADIANS**
-    pub rot: f64,
+    pub position: Position,
 }
 
 impl PlacedCamera {
-    pub fn new(info: CameraInfo, pos: Coordinate, rot: f64) -> Self {
-        Self { info, pos, rot }
+    pub fn new(info: CameraInfo, position: Position) -> Self {
+        Self { info, position, }
     }
 }
 
@@ -70,41 +44,28 @@ impl Setup {
         );
 
         let mut hmap: HashMap<u64, f64> = HashMap::new();
-        let cpos = [
-            (-1., 0.),
-            (0., -1.),
-            (1.,  0.),
-            (0., -1.),
-        ];
+        
         let mut ind = 0;
         let cameras = cameras
             .into_iter()
             .map(|c| {
-                let p = &cpos[ind % 4];
-
                 let bits = c.fov.to_bits();
                 let d = match hmap.get(&bits) {
                     Some(v) => *v,
                     None => {
-                        let v = 0.5 * square_size * (
-                            1. / (
-                                0.5 * c.fov
-                            ).tan() + 1.
-                        );
+                        let v = camloc_common::position::get_camera_distance_in_square(square_size, c.fov);
                         hmap.insert(c.fov.to_bits(), v);
                         v
                     }
                 };
 
                 let info = c;
-                let pos = Coordinate::new(p.0 * d, p.1 * d);
-                let rot = (ind as f64) * 90.;
+                let pos = camloc_common::position::calc_posotion_in_square_distance(ind, d);
                 ind += 1;
 
                 PlacedCamera::new(
                     info,
                     pos,
-                    rot.to_radians()
                 )
             }
         ).collect();
@@ -112,7 +73,7 @@ impl Setup {
         Self { cameras }
     }
 
-    pub fn calculate_position(&self, pxs: &Vec<Option<f64>>) -> Option<Coordinate> {
+    pub fn calculate_position(&self, pxs: &Vec<Option<f64>>) -> Option<Position> {
         let c = self.cameras.len();
         debug_assert_eq!(c, pxs.len());
 
@@ -122,7 +83,7 @@ impl Setup {
         for i in 0..c {
             if let Some(x) = pxs[i] {
                 tangents[i] = Some(
-                    (self.cameras[i].rot + (self.cameras[i].info.fov * (0.5 - x))).tan()
+                    (self.cameras[i].position.rotation + (self.cameras[i].info.fov * (0.5 - x))).tan()
                 );
                 lines += 1;
             }
@@ -131,15 +92,15 @@ impl Setup {
             return None;
         }
 
-        let mut s = Coordinate::new(0., 0.);
+        let mut s = Position::new(0., 0., f64::NAN);
 
         for i in 0..c {
             for j in (i + 1)..c {
                 let Some(atan) = tangents[i] else { continue; };
                 let Some(btan) = tangents[j] else { continue; };
 
-                let c1 = self.cameras[i].pos;
-                let c2 = self.cameras[j].pos;
+                let c1 = self.cameras[i].position;
+                let c2 = self.cameras[j].position;
 
                 let x = (c1.x * atan - c2.x * btan - c1.y + c2.y) / (atan - btan);
                 let y = atan * (x - c1.x) + c1.y;
@@ -151,6 +112,6 @@ impl Setup {
 
         let points = (lines * (lines - 1) / 2) as f64;
 
-        Some(Coordinate::new(s.x / points, s.y / points))
+        Some(Position::new(s.x / points, s.y / points, f64::NAN))
     }
 }

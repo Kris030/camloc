@@ -151,7 +151,7 @@ class Main {
 				.putDouble(config.pos.x)
 				.putDouble(config.pos.y)
 				.putDouble(config.rot)
-				.putDouble(config.fov) // TODO: ?
+				.putDouble(config.fov)
 				.array();
 			ds.send(new DatagramPacket(buff, buff.length, config.serverAddress));
 

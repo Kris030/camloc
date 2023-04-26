@@ -1,7 +1,8 @@
 use std::{sync::Arc, time::{Instant, Duration}, f64::NAN, fmt::{Debug, Display}, mem, net::SocketAddr};
+use camloc_common::{GenerationalValue, position::Position};
 use tokio::{net::UdpSocket, spawn, sync::{RwLock, Mutex}, task::JoinHandle};
 
-use crate::{calc::{Coordinate, Setup, PlacedCamera, CameraInfo}, extrapolations::Extrapolation, utils::GenerationalValue};
+use crate::{calc::{Setup, PlacedCamera, CameraInfo}, extrapolations::Extrapolation};
 
 static DATA_VALIDITY: Duration = Duration::from_millis(500);
 
@@ -16,13 +17,13 @@ impl ClientInfo {
 }
 
 type ConnectionSubscriber = fn(SocketAddr, PlacedCamera) -> ();
-type ServiceSubscriber = fn(Position) -> ();
+type ServiceSubscriber = fn(TimedPosition) -> ();
 
 pub struct LocationService {
 	connection_subscriptions: RwLock<Vec<ConnectionSubscriber>>,
 	subscriptions: RwLock<Vec<ServiceSubscriber>>,
 	extrap: RwLock<Option<Extrapolation>>,
-	last_known_pos: RwLock<Position>,
+	last_known_pos: RwLock<TimedPosition>,
 	clients: Mutex<Vec<ClientInfo>>,
 	start_time: RwLock<Instant>,
 	running: RwLock<bool>,
@@ -66,7 +67,7 @@ impl LocationService {
 			.map_err(|_| "Couldn't create socket")?;
 
 		let instance = LocationService {
-			last_known_pos: Position::default().into(),
+			last_known_pos: TimedPosition::default().into(),
 			setup: Setup::new_freehand(vec![]).into(),
 			connection_subscriptions: vec![].into(),
 			start_time: start_time.into(),
@@ -168,7 +169,7 @@ impl LocationService {
 					let x = f64::from_be_bytes(buf[1..9].try_into().unwrap());
 					let y = f64::from_be_bytes(buf[9..17].try_into().unwrap());
 					let r = f64::from_be_bytes(buf[17..25].try_into().unwrap());
-					let f = f64::from_be_bytes(buf[25..33].try_into().unwrap()); // TODO: ?
+					let f = f64::from_be_bytes(buf[25..33].try_into().unwrap());
 
 					self.clients.lock().await.push(ClientInfo::new(
 						recv_addr,
@@ -180,8 +181,7 @@ impl LocationService {
 
 					let cam = PlacedCamera::new(
 						CameraInfo::new(f),
-						Coordinate::new(x, y),
-						r
+						Position::new(x, y, r),
 					);
 					self.setup.write().await.cameras.push(cam);
 
@@ -209,10 +209,10 @@ impl LocationService {
 		start_time: Instant,
 		pxs: &Vec<Option<f64>>
 	) -> Result<(), String> {
-		let Some(pos) = self.setup.read().await.calculate_position(pxs) else { return Ok(()); };
+		let Some(position) = self.setup.read().await.calculate_position(pxs) else { return Ok(()); };
 
-		let calculated_position = Position {
-			coordinates: pos,
+		let calculated_position = TimedPosition {
+			position,
 			start_time,
 			time: Instant::now(),
 			interpolated: None,
@@ -247,13 +247,13 @@ impl LocationServiceHandle {
 		sw.push(action);
 	}
 
-	pub async fn get_position(&self) -> Option<Position> {
+	pub async fn get_position(&self) -> Option<TimedPosition> {
 		if !*(self.service.running.read().await) {
 			return None;
 		}
 		
 		let pos = self.service.last_known_pos.read().await;
-		if pos.coordinates.x.is_nan() || pos.coordinates.y.is_nan() {
+		if pos.position.x.is_nan() || pos.position.y.is_nan() {
 			return None;
 		}
 		
@@ -267,9 +267,8 @@ impl LocationServiceHandle {
 			}
 
 			x.extrapolator.extrapolate(now)
-				.map(|extrapolated| Position {
-					coordinates:
-					extrapolated,
+				.map(|extrapolated| TimedPosition {
+					position: extrapolated,
 					start_time: *start_time,
 					time: now,
 					interpolated: x.extrapolator
@@ -290,8 +289,8 @@ impl LocationServiceHandle {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Position {
-    pub coordinates: Coordinate,
+pub struct TimedPosition {
+    pub position: Position,
     start_time: Instant,
     pub time: Instant,
 
@@ -300,26 +299,26 @@ pub struct Position {
 	pub interpolated: Option<Duration>,
 }
 
-impl Default for Position {
+impl Default for TimedPosition {
     fn default() -> Self {
         Self {
 			start_time: unsafe { mem::transmute([0u8; 16]) },
 			time: unsafe { mem::transmute([0u8; 16]) },
-			coordinates: Coordinate::new(NAN, NAN),
+			position: Position::new(NAN, NAN, NAN),
 			interpolated: None,
 		}
     }
 }
 
-impl Display for Position {
+impl Display for TimedPosition {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		let coords = &self.coordinates;
+		let pos = &self.position;
 		let t = self.time - self.start_time;
 
 		if let Some(from) = self.interpolated {
-			write!(f, "[{coords} @ {from:.2?} -> {t:.2?}]")
+			write!(f, "[{pos} @ {from:.2?} -> {t:.2?}]")
 		} else {
-			write!(f, "[{coords} @ {t:.2?}]")
+			write!(f, "[{pos} @ {t:.2?}]")
 		}
     }
 }

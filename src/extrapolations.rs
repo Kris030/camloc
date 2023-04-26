@@ -1,10 +1,11 @@
-use crate::{service::Position, calc::Coordinate, utils::Lerp};
+use camloc_common::{position::Position, Lerp};
+use crate::{service::TimedPosition};
 use std::time::{Instant, Duration};
 
 pub trait Extrapolator: Send + Sync {
-    fn add_datapoint(&mut self, position: Position);
-	fn get_last_datapoint(&self) -> Option<Position>;
-    fn extrapolate(&self, time: Instant) -> Option<Coordinate>;
+    fn add_datapoint(&mut self, position: TimedPosition);
+	fn get_last_datapoint(&self) -> Option<TimedPosition>;
+    fn extrapolate(&self, time: Instant) -> Option<Position>;
 }
 
 pub struct Extrapolation {
@@ -23,7 +24,7 @@ impl Extrapolation {
 
 #[derive(Debug, Default)]
 pub struct LinearExtrapolation {
-	data: [Option<Position>; 2],
+	data: [Option<TimedPosition>; 2],
 	p: usize,
 }
 
@@ -37,12 +38,12 @@ impl LinearExtrapolation {
 }
 
 impl Extrapolator for LinearExtrapolation {
-    fn add_datapoint(&mut self, position: Position) {
+    fn add_datapoint(&mut self, position: TimedPosition) {
 		self.data[self.p] = Some(position);
 		self.p = (self.p + 1) % self.data.len();
     }
 
-    fn extrapolate(&self, time: Instant) -> Option<Coordinate> {
+    fn extrapolate(&self, time: Instant) -> Option<Position> {
 		let p_prev = if self.p == 0 {
 			self.data.len() - 1
 		} else {
@@ -56,10 +57,10 @@ impl Extrapolator for LinearExtrapolation {
 		let tmax = d2.time - d1.time;
 		let t = td.as_secs_f64() / tmax.as_secs_f64();
 
-		Some(Coordinate::lerp(&d1.coordinates, &d2.coordinates, t))
+		Some(Position::lerp(&d1.position, &d2.position, t))
     }
 
-    fn get_last_datapoint(&self) -> Option<Position> {
+    fn get_last_datapoint(&self) -> Option<TimedPosition> {
         self.data[self.p]
     }
 }
