@@ -1,5 +1,8 @@
 #[allow(clippy::unusual_byte_groupings)]
 pub mod constants {
+    pub const MAX_MESSAGE_LENGTH: usize = 65507;
+    pub const MAIN_PORT: u16 = 0xddd;
+
     pub mod status_reply {
         pub mod host_type {
             pub const CONFIGLESS: u8 = 0b10_0_0_0000;
@@ -32,7 +35,6 @@ pub enum HostStatus {
     },
 }
 
-#[allow(clippy::from_over_into)]
 impl TryInto<u8> for HostStatus {
     type Error = ();
 
@@ -107,4 +109,41 @@ pub enum ClientStatus {
 pub enum ServerStatus {
     Unreachable,
     Running,
+}
+
+#[derive(Clone, Copy)]
+pub enum Command {
+    Ping = 0x0b,
+
+    Connect = 0xcc,
+
+    Start = 0x60,
+    Stop = 0xcd,
+
+    RequestImage = 0x17,
+    ImagesDone = 0x1d,
+}
+
+impl From<Command> for u8 {
+    fn from(value: Command) -> Self {
+        value as u8
+    }
+}
+
+impl TryInto<Command> for u8 {
+    type Error = ();
+
+    fn try_into(self) -> Result<Command, Self::Error> {
+        use Command::*;
+
+        match self {
+            x if x == Ping         as u8 => Ok(Ping),
+            x if x == Connect      as u8 => Ok(Connect),
+            x if x == Start        as u8 => Ok(Start),
+            x if x == Stop         as u8 => Ok(Stop),
+            x if x == RequestImage as u8 => Ok(RequestImage),
+
+            _ => Err(())
+        }
+    }
 }
