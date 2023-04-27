@@ -1,7 +1,7 @@
 mod scanning;
 mod utils;
 
-use camloc_common::{get_from_stdin, hosts::{HostStatus, ClientStatus, ServerStatus}, position::{Position, get_camera_distance_in_square, calc_posotion_in_square_distance}, calibration};
+use camloc_common::{get_from_stdin, hosts::{constants::{MAIN_PORT, MAX_MESSAGE_LENGTH}, HostStatus, ClientStatus, ServerStatus, Command}, position::{Position, get_camera_distance_in_square, calc_posotion_in_square_distance}, calibration};
 use network_interface::{NetworkInterfaceConfig, NetworkInterface, Addr};
 use std::{net::{IpAddr, UdpSocket}, time::{Duration, Instant}};
 use opencv::{prelude::*, imgcodecs};
@@ -91,7 +91,7 @@ fn main() -> Result<(), String> {
         .map_err(|_| "Couldn't create socket")?;
 
     let mut organizer = Organizer {
-        buffer: [0; 65507],
+        buffer: [0; MAX_MESSAGE_LENGTH],
         setup_type,
         hosts,
         sock,
@@ -148,9 +148,9 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, BUFFER_SIZE> {
         let selected: usize = get_from_stdin("\nSelect client to start: ")?;
         let host_index = *options.get(selected)
             .ok_or("No such index")?;
-        let addr = ((self.hosts[host_index]).ip, TARGET_PORT);
+        let addr = ((self.hosts[host_index]).ip, MAIN_PORT);
 
-        self.sock.send_to(START_CLIENT, addr)
+        self.sock.send_to(&[Command::Start.into()], addr)
             .map_err(|_| "Couldn't send client start")?;
 
         let uncalibrated = match self.hosts[host_index].status {
@@ -175,7 +175,7 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, BUFFER_SIZE> {
         };
 
         loop {
-            self.sock.send_to(REQUEST_IMAGE, addr)
+            self.sock.send_to(&[Command::RequestImage.into()], addr)
                 .map_err(|_| "Couldn't request image")?;
 
             let img = self.get_image((self.hosts[host_index]).ip)?;
@@ -206,6 +206,8 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, BUFFER_SIZE> {
                 break;
             }
         }
+        self.sock.send_to(&[Command::ImagesDone.into()], addr)
+            .map_err(|_| "Couldn't send images done")?;
 
         let ip_bytes = server_ip.as_bytes();
         let ip_len = ip_bytes.len() as u16;
@@ -255,8 +257,8 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, BUFFER_SIZE> {
         let selected: usize = get_from_stdin("\nSelect client to start: ")?;
         let host = options[selected];
 
-        let addr = (self.hosts[host].ip, TARGET_PORT);
-        self.sock.send_to(STOP_CLIENT, addr)
+        let addr = (self.hosts[host].ip, MAIN_PORT);
+        self.sock.send_to(&[Command::Stop.into()], addr)
             .map_err(|_| "Couldn't send client start")?;
 
         self.hosts.remove(host);
@@ -287,7 +289,7 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, BUFFER_SIZE> {
     }
 
     fn scan_with_broadcast(&mut self, broadcast: IpAddr) -> Result<(), &'static str> {
-        self.sock.send_to(PING, (broadcast, TARGET_PORT))
+        self.sock.send_to(&[Command::Ping.into()], (broadcast, MAIN_PORT))
             .map_err(|_| "Couldn't send ping")?;
 
         let till = Instant::now() + WAIT_DURATION;
@@ -391,10 +393,3 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, BUFFER_SIZE> {
 const TIMEOUT_DURATION: Duration = Duration::from_millis(500);
 const WAIT_DURATION:    Duration = Duration::from_millis(TIMEOUT_DURATION.as_millis() as u64 * 4);
 
-// TODO: port in upper range (non-commercial)
-const TARGET_PORT:      u16 = 1111;
-
-const PING:             &[u8] = &[0x0b];
-const START_CLIENT:     &[u8] = &[0x60];
-const STOP_CLIENT:      &[u8] = &[0xcd];
-const REQUEST_IMAGE:    &[u8] = &[0x60];
