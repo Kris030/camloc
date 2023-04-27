@@ -1,5 +1,5 @@
+use camloc_common::{GenerationalValue, position::Position, hosts::{Command, HostStatus, ServerStatus::Running}};
 use std::{sync::Arc, time::{Instant, Duration}, f64::NAN, fmt::{Debug, Display}, mem, net::SocketAddr};
-use camloc_common::{GenerationalValue, position::Position};
 use tokio::{net::UdpSocket, spawn, sync::{RwLock, Mutex}, task::JoinHandle};
 
 use crate::{calc::{Setup, PlacedCamera, CameraInfo}, extrapolations::Extrapolation};
@@ -123,8 +123,8 @@ impl LocationService {
 			match recv_len {
 
 				// "organizer bonk"
-				1 if buf[0] == 0x0b => {
-					udp_socket.send_to(&[0x5a], recv_addr).await
+				1 if buf[0] == Command::Ping.into() => {
+					udp_socket.send_to(&[HostStatus::Server(Running).try_into().unwrap()], recv_addr).await
 						.map_err(|_| "Error while sending")?;
 				},
 
@@ -165,7 +165,7 @@ impl LocationService {
 				},
 
 				// connection request
-				33 if buf[0] == 0xcc => {
+				33 if buf[0] == Command::Connect.into() => {
 					let x = f64::from_be_bytes(buf[1..9].try_into().unwrap());
 					let y = f64::from_be_bytes(buf[9..17].try_into().unwrap());
 					let r = f64::from_be_bytes(buf[17..25].try_into().unwrap());
@@ -195,7 +195,7 @@ impl LocationService {
 		}
 
 		for c in self.clients.lock().await.iter() {
-			udp_socket.send_to(&[0xcdu8], c.address).await
+			udp_socket.send_to(&[Command::Stop.into()], c.address).await
 				.map_err(|_| "Couldn't tell all clients to stop")?;
 		}
 
