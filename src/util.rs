@@ -81,15 +81,14 @@ pub fn draw_x(frame: &mut Mat, p: core::Point2i, c: Color) -> opencv::Result<()>
         2,
         imgproc::LINE_8,
         0,
-    )?;
-    Ok(())
+    )
 }
 
 pub fn avg_corners(bounding: &types::VectorOfPoint2f) -> core::Point2i {
-    return core::Point2i::new(
+    core::Point2i::new(
         (bounding.iter().map(|s| s.x).sum::<f32>() / bounding.len() as f32).round() as i32,
         (bounding.iter().map(|s| s.y).sum::<f32>() / bounding.len() as f32).round() as i32,
-    );
+    )
 }
 
 pub fn bounding_to_rect(bounding: &types::VectorOfPoint2f, offset: i32) -> Option<core::Rect2i> {
@@ -107,8 +106,7 @@ pub fn bounding_to_rect(bounding: &types::VectorOfPoint2f, offset: i32) -> Optio
 }
 
 pub fn rect(frame: &mut Mat, rect: core::Rect2i, c: Color) -> opencv::Result<()> {
-    opencv::imgproc::rectangle(frame, rect, get_color(&c), 2, opencv::imgproc::LINE_8, 0)?;
-    Ok(())
+    imgproc::rectangle(frame, rect, get_color(&c), 2, imgproc::LINE_8, 0)
 }
 
 pub fn relative_x(frame: &Mat, point: core::Point2i) -> f64 {

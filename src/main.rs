@@ -2,38 +2,28 @@ mod aruco;
 mod track;
 mod util;
 
-use aruco::Aruco;
+use std::{net::{SocketAddr, UdpSocket}, time::Duration};
 use opencv::{core, highgui, prelude::*, videoio};
-use std::{
-    net::{SocketAddr, UdpSocket},
-    time::Duration,
-};
+use camloc_common::hosts::{Command, constants::{MAIN_PORT, MAX_MESSAGE_LENGTH}, HostStatus, ClientStatus};
 use track::Tracking;
+use aruco::Aruco;
 
 use crate::aruco::detect;
 
-const PING:    u8 = 0x0b;
-const PONG:    u8 = 0xcf;
-const START:   u8 = 0x60;
-const STOP:    u8 = 0xcd;
-const CONNECT: u8 = 0xcc;
-
 const BUF_SIZE: usize = 6 * 8;
 
-const PORT: u16 = 1111;
-
 struct Config {
-    x: f64,
-    y: f64,
+    server: SocketAddr,
     rotation: f64,
     fov: f64,
-    server: SocketAddr,
+    x: f64,
+    y: f64,
 }
 
 impl Config {
     fn to_be_bytes(&self) -> Vec<u8> {
         [
-            CONNECT.to_be_bytes().as_slice(),
+            Into::<u8>::into(Command::Connect).to_be_bytes().as_slice(),
             self.x.to_be_bytes().as_slice(),
             self.y.to_be_bytes().as_slice(),
             self.rotation.to_be_bytes().as_slice(),
@@ -48,20 +38,21 @@ impl Config {
             y: f64::from_be_bytes(buf[8..15].try_into()?),
             rotation: f64::from_be_bytes(buf[16..23].try_into()?),
             fov: f64::from_be_bytes(buf[24..31].try_into()?),
-            server: SocketAddr::new(ip.parse()?, PORT),
+            server: SocketAddr::new(ip.parse()?, MAIN_PORT),
         })
     }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     highgui::named_window("videocap", highgui::WINDOW_AUTOSIZE)?;
+
     let mut frame = Mat::default();
     let mut draw = Mat::default();
     let mut aruco = Aruco::new(2)?;
     let mut tracker = Tracking::new()?;
     let mut has_object = false;
 
-    let socket = UdpSocket::bind(("0.0.0.0", PORT))?;
+    let socket = UdpSocket::bind(("0.0.0.0", MAIN_PORT))?;
     let mut buf: [u8; BUF_SIZE] = [0; BUF_SIZE];
 
     loop {
@@ -70,8 +61,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // wait for organizer ping
         let organizer = loop {
             let (len, org) = socket.recv_from(&mut buf)?;
-            if len == 1 && buf[0] == PING {
-                socket.send_to(&[PONG], org)?;
+            if len == 1 && buf[0] == Command::Ping.into() {
+                socket.send_to(&[
+                    HostStatus::Client {
+                        status: ClientStatus::Idle,
+                        calibrated: false,
+                    }.try_into().unwrap()], org
+                )?;
                 break org;
             }
         };
@@ -79,7 +75,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // wait for organizer start
         loop {
             let len = socket.recv(&mut buf)?;
-            if len == 1 && buf[0] == START {
+            if len == 1 && buf[0] == Command::Connect.into() {
                 break;
             }
         }
@@ -88,16 +84,56 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if !videoio::VideoCapture::is_opened(&cam)? {
             return Err("camera index not found!".into());
         }
-        cam.read(&mut frame)?;
 
-        let mut image_buffer = core::Vector::new();
-        opencv::imgcodecs::imencode(
-            ".jpg",
-            &frame,
-            &mut image_buffer,
-            &core::Vector::new(),
-        )?;
-        socket.send_to(image_buffer.as_slice(), organizer)?;
+        'image_loop: loop {
+            cam.read(&mut frame)?;
+
+            // TODO: simplify
+            let mut image_buffer = core::Vector::new();
+            opencv::imgcodecs::imencode(
+                ".jpg",
+                &frame,
+                &mut image_buffer,
+                &core::Vector::new(),
+            )?;
+
+            let total = image_buffer.len();
+            let image_buffer = [
+                (total as u64).to_be_bytes().as_slice(),
+                image_buffer.as_slice(),
+            ].concat();
+
+            let total = total + std::mem::size_of::<u64>();
+
+            let image_buffer = &image_buffer[..];
+            let mut done = 0;
+
+            while done != total {                
+                let to_send = (total - done)
+                    .min(MAX_MESSAGE_LENGTH);
+
+                socket.send_to(
+                    &image_buffer[done..(done + to_send)],
+                    organizer
+                )?;
+
+                done += to_send;
+            }
+
+            'request_wait_loop: loop {
+                let (len, addr) = socket.recv_from(&mut buf)?;
+                if addr != organizer && len != 1 {
+                    continue;
+                }
+
+                if buf[0] == Command::RequestImage.into() {
+                    break 'request_wait_loop
+                } else if buf[0] == Command::ImagesDone.into() {
+                    break 'image_loop;
+                }
+
+            }
+        }
 
         // recieve camera info and server ip
         socket.recv(&mut buf)?;
@@ -111,11 +147,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Ok(1): one-byte recieved message
             // Err(): timeout
             if let Ok(1) = socket.recv(&mut buf) {
-                match buf[0] {
-                    STOP => break,
+                match TryInto::<Command>::try_into(buf[0]) {
+                    Ok(Command::Stop) => break,
     
-                    PING => {
-                        socket.send_to(&[PONG], organizer)?;
+                    Ok(Command::Ping) => {
+                        socket.send_to(&[HostStatus::Client {
+                            status: ClientStatus::Running, calibrated: true,
+                        }.try_into().unwrap()], organizer)?;
                     },
     
                     _ => (),

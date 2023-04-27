@@ -1,5 +1,9 @@
-[workspace]
-members = ["camloc", "calibration"]
+[package]
+name = "camloc_client"
+version = "0.1.0"
+edition = "2021"
 
-[profile.release]
-strip = true
+[dependencies]
+# TODO: camloc_common = { git = "https://github.com/Kris030/camloc_common" }
+camloc_common = { path = "../common", version = "0.1.0" }
+opencv = "0.80.0"
