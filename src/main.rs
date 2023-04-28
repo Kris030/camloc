@@ -2,9 +2,9 @@ mod aruco;
 mod track;
 mod util;
 
-use std::{net::{SocketAddr, UdpSocket}, time::Duration};
-use opencv::{core, highgui, prelude::*, videoio};
 use camloc_common::hosts::{Command, constants::{MAIN_PORT, MAX_MESSAGE_LENGTH}, HostStatus, ClientStatus};
+use std::{net::{SocketAddr, UdpSocket}, time::Duration, mem::size_of};
+use opencv::{core, highgui, prelude::*, videoio};
 use track::Tracking;
 use aruco::Aruco;
 
@@ -21,7 +21,7 @@ struct Config {
 }
 
 impl Config {
-    fn to_be_bytes(&self) -> Vec<u8> {
+    fn to_connection_request(&self) -> [u8; 33] {
         [
             Into::<u8>::into(Command::Connect).to_be_bytes().as_slice(),
             self.x.to_be_bytes().as_slice(),
@@ -29,15 +29,21 @@ impl Config {
             self.rotation.to_be_bytes().as_slice(),
             self.fov.to_be_bytes().as_slice(),
         ].concat()
+            .try_into()
+            .unwrap()
     }
 
-    fn from_buffer(buf: &[u8]) -> Result<Self, Box<dyn std::error::Error>> {
-        let ip = String::from_utf8(buf[34..].to_vec())?;
+    fn from_buffer(buf: &[u8], calibrated: bool) -> Result<Self, Box<dyn std::error::Error>> {
+        if calibrated {
+            todo!()
+        }
+
+        let ip = String::from_utf8(buf[32..].to_vec())?;
         Ok(Self {
-            x: f64::from_be_bytes(buf[0..7].try_into()?),
-            y: f64::from_be_bytes(buf[8..15].try_into()?),
-            rotation: f64::from_be_bytes(buf[16..23].try_into()?),
-            fov: f64::from_be_bytes(buf[24..31].try_into()?),
+            x: f64::from_be_bytes(buf[0..8].try_into()?),
+            y: f64::from_be_bytes(buf[8..16].try_into()?),
+            rotation: f64::from_be_bytes(buf[16..24].try_into()?),
+            fov: f64::from_be_bytes(buf[24..32].try_into()?),
             server: SocketAddr::new(ip.parse()?, MAIN_PORT),
         })
     }
@@ -53,7 +59,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut has_object = false;
 
     let socket = UdpSocket::bind(("0.0.0.0", MAIN_PORT))?;
-    let mut buf: [u8; BUF_SIZE] = [0; BUF_SIZE];
+    let mut buf = [0; BUF_SIZE];
 
     loop {
         println!("waiting for connections...");
@@ -74,8 +80,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // wait for organizer start
         loop {
-            let len = socket.recv(&mut buf)?;
-            if len == 1 && buf[0] == Command::Connect.into() {
+            let (len, addr) = socket.recv_from(&mut buf)?;
+            if addr == organizer && len == 1 && buf[0] == Command::Connect.into() {
                 break;
             }
         }
@@ -88,7 +94,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         'image_loop: loop {
             cam.read(&mut frame)?;
 
-            // TODO: simplify
             let mut image_buffer = core::Vector::new();
             opencv::imgcodecs::imencode(
                 ".jpg",
@@ -103,7 +108,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 image_buffer.as_slice(),
             ].concat();
 
-            let total = total + std::mem::size_of::<u64>();
+            let total = total + size_of::<u64>();
 
             let image_buffer = &image_buffer[..];
             let mut done = 0;
@@ -122,7 +127,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             'request_wait_loop: loop {
                 let (len, addr) = socket.recv_from(&mut buf)?;
-                if addr != organizer && len != 1 {
+                if addr != organizer || len != 1 {
                     continue;
                 }
 
@@ -131,16 +136,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 } else if buf[0] == Command::ImagesDone.into() {
                     break 'image_loop;
                 }
-
             }
         }
 
         // recieve camera info and server ip
         socket.recv(&mut buf)?;
-        let config = Config::from_buffer(&buf)?;
+        let config = Config::from_buffer(&buf, false)?;
 
         // connect to server
-        socket.send_to(&config.to_be_bytes(), config.server)?;
+        socket.send_to(&config.to_connection_request(), config.server)?;
         socket.set_read_timeout(Some(Duration::from_millis(1)))?;
 
         loop {
