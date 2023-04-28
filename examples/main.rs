@@ -39,7 +39,7 @@ async fn run() -> Result<(), String> {
             Extrapolation::new::<LinearExtrapolation>(
                 Duration::from_millis(500)
             )
-        ), 1111
+        ), camloc_common::hosts::constants::MAIN_PORT
     ).await?;
 
     location_service.subscribe_connection(|address, camera| {
