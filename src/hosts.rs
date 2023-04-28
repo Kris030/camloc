@@ -113,15 +113,23 @@ pub enum ServerStatus {
 
 #[derive(Clone, Copy)]
 pub enum Command {
-    Ping = 0x0b,
+    Ping = Command::PING as isize,
 
-    Connect = 0xcc,
+    Connect = Command::CONNECT as isize,
 
-    Start = 0x60,
-    Stop = 0xcd,
+    Start = Command::START as isize,
+    Stop = Command::STOP as isize,
 
-    RequestImage = 0x17,
-    ImagesDone = 0x1d,
+    RequestImage = Command::REQUEST_IMAGE as isize,
+    ImagesDone = Command::IMAGES_DONE as isize,
+}
+impl Command {
+    pub const PING: u8 = 0x0b;
+    pub const CONNECT: u8 = 0xcc;
+    pub const START: u8 = 0x60;
+    pub const STOP: u8 = 0xcd;
+    pub const REQUEST_IMAGE: u8 = 0x17;
+    pub const IMAGES_DONE: u8 = 0x1d;
 }
 
 impl From<Command> for u8 {
