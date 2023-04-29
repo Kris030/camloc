@@ -81,7 +81,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // wait for organizer start
         loop {
             let (len, addr) = socket.recv_from(&mut buf)?;
-            if addr == organizer && len == 1 && buf[0] == Command::Connect.into() {
+            if (addr == organizer) && (len == 1) && (buf[0] == Command::Start.into()) {
                 break;
             }
         }
@@ -92,6 +92,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         'image_loop: loop {
+            'request_wait_loop: loop {
+                let (len, addr) = socket.recv_from(&mut buf)?;
+                if addr != organizer || len != 1 {
+                    continue;
+                }
+
+                if buf[0] == Command::RequestImage.into() {
+                    break 'request_wait_loop
+                } else if buf[0] == Command::ImagesDone.into() {
+                    break 'image_loop;
+                }
+            }
+
             cam.read(&mut frame)?;
 
             let mut image_buffer = core::Vector::new();
@@ -123,19 +136,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 )?;
 
                 done += to_send;
-            }
-
-            'request_wait_loop: loop {
-                let (len, addr) = socket.recv_from(&mut buf)?;
-                if addr != organizer || len != 1 {
-                    continue;
-                }
-
-                if buf[0] == Command::RequestImage.into() {
-                    break 'request_wait_loop
-                } else if buf[0] == Command::ImagesDone.into() {
-                    break 'image_loop;
-                }
             }
         }
 
