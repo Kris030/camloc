@@ -73,9 +73,17 @@ pub fn find_board(board: &CharucoBoard, image: &Mat) -> opencv::Result<Option<(t
     }
 }
 
-pub fn display_image(image: &Mat, title: &str) -> opencv::Result<()> {
+pub fn display_image(image: &Mat, title: &str, destroy: bool) -> opencv::Result<()> {
     highgui::imshow(title, image)?;
-    while matches!(highgui::wait_key(0), Err(_) | Ok(113)) {}
+
+    while !matches!(
+        highgui::wait_key(0),
+        Err(_) | Ok(113)
+    ) {}
+
+    if destroy {
+        highgui::destroy_window(title)?;
+    }
     Ok(())
 }
 
