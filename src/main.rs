@@ -1,10 +1,17 @@
 mod scanning;
 mod utils;
 
-use camloc_common::{get_from_stdin, hosts::{constants::{MAIN_PORT, MAX_MESSAGE_LENGTH}, HostStatus, ClientStatus, ServerStatus, Command}, position::{Position, get_camera_distance_in_square, calc_posotion_in_square_distance}, calibration};
+use camloc_common::{
+    position::{Position, get_camera_distance_in_square, calc_posotion_in_square_distance},
+    hosts::{HostStatus, ClientStatus, ServerStatus, Command},
+    hosts::constants::{MAIN_PORT, MAX_MESSAGE_LENGTH},
+    calibration::{self, display_image},
+    get_from_stdin,
+};
 use network_interface::{NetworkInterfaceConfig, NetworkInterface, Addr};
-use std::{net::{IpAddr, UdpSocket}, time::{Duration, Instant}};
+use std::{net::{IpAddr, UdpSocket}, time::{Duration, Instant}, mem::size_of};
 use opencv::{prelude::*, imgcodecs};
+use scanning::IPV4AddressTemplate;
 
 pub(crate) struct Host {
     pub(crate) status: HostStatus,
@@ -178,7 +185,13 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, BUFFER_SIZE> {
             self.sock.send_to(&[Command::RequestImage.into()], addr)
                 .map_err(|_| "Couldn't request image")?;
 
+            let timeout = self.sock.read_timeout().map_err(|_| "Couldn't get timeout???")?;
+            self.sock.set_read_timeout(None).map_err(|_| "Couldn't set timeout???")?;
+
             let img = self.get_image((self.hosts[host_index]).ip)?;
+
+            self.sock.set_read_timeout(timeout).map_err(|_| "Couldn't set timeout???")?;
+
             if let Some((board, imgs)) = &mut uncalibrated {
                 let detection = calibration::find_board(board, &img)
                     .map_err(|_| "Couldn't find board")?;
@@ -187,16 +200,15 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, BUFFER_SIZE> {
                 if let Some((cs, ids)) = detection {
                     let drawn_boards = calibration::draw_boards(&img, &cs, &ids)
                         .map_err(|_| "Couldn't draw detected boards")?;
-                    calibration::display_image(&drawn_boards, title)
+                    display_image(&drawn_boards, title)
                         .map_err(|_| "Couldn't display image")?;
-
 
                     let keep = get_from_stdin::<String>("  Keep image? (y)")?.to_lowercase() == "y";
                     if keep {
                         imgs.push(img);
                     }
                 } else {
-                    calibration::display_image(&img, title)
+                    display_image(&img, title)
                         .map_err(|_| "Couldn't display image")?;
                 }
             }
@@ -271,20 +283,36 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, BUFFER_SIZE> {
         let IpAddr::V4(ip) = own_ip.ip() else {
             unreachable!()
         };
-        
+
         let set_broadcast = self.sock.set_broadcast(true).is_ok();
 
         self.sock.set_read_timeout(Some(TIMEOUT_DURATION))
             .map_err(|_| "Couldn't set timeout")?;
 
         match own_ip.broadcast() {
-            Some(broadcast) if set_broadcast => self.scan_with_broadcast(broadcast),
-            _ => self.scan_with_netmask(ip, own_ip.netmask().expect("No netmask"))
+            Some(broadcast) if set_broadcast && !ip.is_loopback() =>
+                self.scan_with_broadcast(broadcast),
+            _ => {
+                let netmask = own_ip.netmask()
+                    .expect("No netmask");
+                let netmask = if let IpAddr::V4(n) = netmask {
+                    n
+                } else {
+                    unreachable!()
+                };
+                self.scan_with_template(
+                    IPV4AddressTemplate::from_netmask(
+                        ip,
+                        scanning::get_netmask_bits(netmask) as usize,
+                        scanning::TemplateMember::Fixed(MAIN_PORT)
+                    )
+                )
+            }
         }
     }
 
     #[allow(unused, clippy::ptr_arg)]
-    fn scan_with_netmask(&mut self, ip: std::net::Ipv4Addr, netmask: IpAddr) -> Result<(), &'static str> {
+    fn scan_with_template(&mut self, template: IPV4AddressTemplate) -> Result<(), &'static str> {
         todo!()
     }
 
@@ -351,34 +379,29 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, BUFFER_SIZE> {
     fn get_image(&mut self, ip: IpAddr) -> Result<Mat, &'static str> {
         let len = self.recieve_from_host(ip)?;
 
-        if len < std::mem::size_of::<u64>() {
+        if len < size_of::<u64>() {
             return Err("No length provided");
         }
 
-        let mut img_size = u64::from_be_bytes(self.buffer[..=8].try_into().map_err(|_| "Not eight bytes???")?) as usize;
-        let mut img_buffer = Mat::from_slice(&self.buffer[8..])
-            .map_err(|_| "Coulnd't create image buffer")?;
+        let mut img_size = u64::from_be_bytes(self.buffer[..8].try_into().map_err(|_| "Not eight bytes???")?) as usize;
+        let mut img_buffer = opencv::core::Vector::from_slice(&self.buffer[8..]);
+            // .map_err(|_| "Coulnd't create image buffer")?;
 
-        if img_size <= BUFFER_SIZE - std::mem::size_of::<u64>() {
-            return imgcodecs::imdecode(
-                &img_buffer,
-                imgcodecs::IMREAD_COLOR
-            ).map_err(|_| "Couldn't decode image")
-        }
-        img_size -= BUFFER_SIZE - std::mem::size_of::<u64>();
-
+        img_size -= img_size + size_of::<u64>();
         while img_size != 0 {
             let len = self.recieve_from_host(ip)?;
 
-            if len < std::mem::size_of::<u64>() {
+            if len < size_of::<u64>() {
                 continue;
             }
 
-            let b = Mat::from_slice(&self.buffer[..len])
-                .map_err(|_| "Couldn't create mat buffer")?;
-
-            img_buffer.push_back(&b)
-                .map_err(|_| "Couldn't push back mat buffer")?;
+            let b = opencv::core::Vector::from_slice(&self.buffer[..len]);
+                // .map_err(|_| "Couldn't create mat buffer")?;
+                
+            // println!("{:?} vs {:?}", img_buffer.mat_size(), b.mat_size());
+                
+            img_buffer.extend(&b);
+                // .map_err(|_| "Couldn't push back mat buffer")?;
 
             img_size -= len;
         }
