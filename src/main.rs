@@ -50,8 +50,6 @@ impl Config {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    highgui::named_window("videocap", highgui::WINDOW_AUTOSIZE)?;
-
     let mut frame = Mat::default();
     let mut draw = Mat::default();
     let mut aruco = Aruco::new(2)?;
@@ -147,6 +145,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         socket.send_to(&config.to_connection_request(), config.server)?;
         socket.set_read_timeout(Some(Duration::from_millis(1)))?;
 
+        highgui::named_window("videocap", highgui::WINDOW_AUTOSIZE)?;
         loop {
             // Ok(1): one-byte recieved message
             // Err(): timeout
@@ -179,7 +178,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             )?;
 
             highgui::imshow("videocap", &draw)?;
-            socket.send_to(&x.to_be_bytes(), config.server)?;
+            socket.send_to(&[
+                    &[Command::ValueUpdate.into()],
+                    x.to_be_bytes().as_slice(),
+                ].concat(), config.server
+            )?;
         }
+        highgui::destroy_all_windows()?;
     }
 }
