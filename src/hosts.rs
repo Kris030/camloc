@@ -122,14 +122,17 @@ pub enum Command {
 
     RequestImage = Command::REQUEST_IMAGE as isize,
     ImagesDone = Command::IMAGES_DONE as isize,
+
+    ValueUpdate = Command::VALUE_UPDATE as isize,
 }
 impl Command {
-    pub const PING: u8 = 0x0b;
-    pub const CONNECT: u8 = 0xcc;
-    pub const START: u8 = 0x60;
-    pub const STOP: u8 = 0xcd;
-    pub const REQUEST_IMAGE: u8 = 0x17;
-    pub const IMAGES_DONE: u8 = 0x1d;
+    const PING: u8 = 0x0b;
+    const CONNECT: u8 = 0xcc;
+    const START: u8 = 0x60;
+    const STOP: u8 = 0xcd;
+    const REQUEST_IMAGE: u8 = 0x17;
+    const IMAGES_DONE: u8 = 0x1d;
+    const VALUE_UPDATE: u8 = 0x21;
 }
 
 impl From<Command> for u8 {
@@ -150,6 +153,7 @@ impl TryInto<Command> for u8 {
             x if x == Start        as u8 => Ok(Start),
             x if x == Stop         as u8 => Ok(Stop),
             x if x == RequestImage as u8 => Ok(RequestImage),
+            x if x == ValueUpdate  as u8 => Ok(ValueUpdate),
 
             _ => Err(())
         }
