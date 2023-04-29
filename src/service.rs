@@ -129,7 +129,7 @@ impl LocationService {
 				},
 
 				// update value
-				8 => {
+				8 if buf[0] == Command::ValueUpdate.into() => {
 					let mut clients = self.clients.lock().await;
 					let mut ci = None;
 					let (mut mins, mut mini) = (0, 0);
@@ -153,7 +153,7 @@ impl LocationService {
 					}
 					if let Some(ci) = ci {
 						clients[ci].last_value.set((
-							f64::from_be_bytes(buf[..8].try_into().unwrap()),
+							f64::from_be_bytes(buf[1..9].try_into().unwrap()),
 							recv_time
 						));
 
