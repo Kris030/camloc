@@ -63,9 +63,10 @@ loop
 		loop
 			send image request [SEND Command::RequestImage]
 			recieve jpg image [RECV len: u64, bytes: [u8]]
-				show image to user and prompt for camera info
-				send camera info and server ip [SEND x: f64, y: f64, rotation: f64, fov: f64, ip_len: u16, ip: [u8]]
+				show image to user
 				if user wants to quit
 					send stream stop [SEND Command::ImagesDone]
+		prompt user for position (and calibrate if needed)
+		send info and server ip [SEND x: f64, y: f64, rotation: f64, fov: f64, ip_len: u16, ip: [u8]]
 	if client stop
 		send stop [SEND Command::Stop]
