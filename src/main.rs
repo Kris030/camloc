@@ -10,7 +10,7 @@ use camloc_common::{
 };
 use network_interface::{NetworkInterfaceConfig, NetworkInterface, Addr};
 use std::{net::{IpAddr, UdpSocket}, time::{Duration, Instant}, mem::size_of};
-use opencv::{prelude::*, imgcodecs};
+use opencv::{prelude::*, imgcodecs, core};
 use scanning::IPV4AddressTemplate;
 
 pub(crate) struct Host {
@@ -196,25 +196,28 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, BUFFER_SIZE> {
                 let detection = calibration::find_board(board, &img)
                     .map_err(|_| "Couldn't find board")?;
 
-                let title = &format!("Image {}", imgs.len());
                 if let Some((cs, ids)) = detection {
                     let drawn_boards = calibration::draw_boards(&img, &cs, &ids)
                         .map_err(|_| "Couldn't draw detected boards")?;
-                    display_image(&drawn_boards, title)
+                    display_image(&drawn_boards, "recieved", false)
                         .map_err(|_| "Couldn't display image")?;
 
-                    let keep = get_from_stdin::<String>("  Keep image? (y)")?.to_lowercase() == "y";
+                    let keep = get_from_stdin::<String>("  Keep image? (y) ")?.to_lowercase() == "y";
                     if keep {
                         imgs.push(img);
                     }
                 } else {
-                    display_image(&img, title)
+                    display_image(&img, "recieved", false)
                         .map_err(|_| "Couldn't display image")?;
                 }
+            } else {
+                display_image(&img, "recieved", false)
+                    .map_err(|_| "Couldn't display image")?;
             }
 
-            let more = get_from_stdin::<String>("  Continue?")?.to_lowercase() != "y";
-            if more {
+            let more = get_from_stdin::<String>("  Continue? (y) ")?.to_lowercase() == "y";
+            if !more {
+                let _ = opencv::highgui::destroy_window("recieved");
                 break;
             }
         }
@@ -368,7 +371,7 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, BUFFER_SIZE> {
 
     fn recieve_from_host(&mut self, ip: IpAddr) -> Result<usize, &'static str> {
         loop {
-            let (len, addr) = self.sock.peek_from(&mut self.buffer)
+            let (len, addr) = self.sock.recv_from(&mut self.buffer)
                 .map_err(|_| "Couldn't recive data")?;
             if addr.ip() == ip {
                 return Ok(len);
@@ -383,26 +386,21 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, BUFFER_SIZE> {
             return Err("No length provided");
         }
 
-        let mut img_size = u64::from_be_bytes(self.buffer[..8].try_into().map_err(|_| "Not eight bytes???")?) as usize;
-        let mut img_buffer = opencv::core::Vector::from_slice(&self.buffer[8..]);
-            // .map_err(|_| "Coulnd't create image buffer")?;
+        let mut img_size = u64::from_be_bytes(
+            self.buffer[..8].try_into()
+                .map_err(|_| "Not eight bytes???")?
+        ) as usize + size_of::<u64>() - len;
 
-        img_size -= img_size + size_of::<u64>();
+        let mut img_buffer = core::Vector::from_slice(&self.buffer[8..]);
+        img_buffer.reserve(img_size);
+
         while img_size != 0 {
             let len = self.recieve_from_host(ip)?;
-
             if len < size_of::<u64>() {
                 continue;
             }
 
-            let b = opencv::core::Vector::from_slice(&self.buffer[..len]);
-                // .map_err(|_| "Couldn't create mat buffer")?;
-                
-            // println!("{:?} vs {:?}", img_buffer.mat_size(), b.mat_size());
-                
-            img_buffer.extend(&b);
-                // .map_err(|_| "Couldn't push back mat buffer")?;
-
+            img_buffer.extend(self.buffer[..len].to_vec());
             img_size -= len;
         }
 
