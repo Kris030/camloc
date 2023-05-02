@@ -1,5 +1,5 @@
 use opencv::{highgui, imgcodecs, prelude::*, videoio, objdetect::CharucoBoard};
-use camloc_common::calibration::{find_board, CameraParams, draw_charuco_board};
+use camloc_common::calibration::{find_board, draw_charuco_board};
 
 use crate::calibrate::load_camera_params;
 
@@ -11,20 +11,7 @@ pub fn take_samples(board: &CharucoBoard, filename: Option<String>) -> opencv::R
     }
 
     let camera_params = if let Some(f) = filename {
-        let mut optimal_matrix = Mat::default();
-        let mut camera_matrix = Mat::default();
-        let mut dist_coeffs = Mat::default();
-        load_camera_params(
-            f.as_str(),
-            &mut camera_matrix,
-            &mut dist_coeffs,
-            &mut optimal_matrix,
-        )?;
-        Some(CameraParams {
-            optimal_matrix,
-            camera_matrix,
-            dist_coeffs,
-        })
+        Some(load_camera_params(&f)?)
     } else {
         None
     };

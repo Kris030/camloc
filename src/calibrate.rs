@@ -1,3 +1,4 @@
+use camloc_common::calibration::CameraParams;
 use opencv::{
     objdetect::{self, CharucoDetector, CharucoParameters, CharucoBoard},
     core::{self, FileStorage, TermCriteria},
@@ -172,18 +173,17 @@ pub fn save_camera_params(
     Ok(())
 }
 
-pub fn load_camera_params(
-    filename: &str,
-    camera_matrix: &mut Mat,
-    dist_coeffs: &mut Mat,
-    optimal_matrix: &mut Mat,
-) -> opencv::Result<()> {
+pub fn load_camera_params(filename: &str) -> opencv::Result<CameraParams> {
     let mut fs = FileStorage::new(filename, core::FileStorage_READ, "")?;
 
-    fs.get("camera_matrix")?.mat()?.copy_to(camera_matrix)?;
-    fs.get("dist_coeffs")?.mat()?.copy_to(dist_coeffs)?;
-    fs.get("optimal_matrix")?.mat()?.copy_to(optimal_matrix)?;
+    let mut camera_matrix = Mat::default();
+    let mut dist_coeffs = Mat::default();
+    let mut optimal_matrix = Mat::default();
+
+    fs.get("camera_matrix")?.mat()?.copy_to(&mut camera_matrix)?;
+    fs.get("dist_coeffs")?.mat()?.copy_to(&mut dist_coeffs)?;
+    fs.get("optimal_matrix")?.mat()?.copy_to(&mut optimal_matrix)?;
 
     fs.release()?;
-    Ok(())
+    Ok(CameraParams { optimal_matrix, camera_matrix, dist_coeffs })
 }
