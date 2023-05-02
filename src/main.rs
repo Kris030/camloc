@@ -30,11 +30,11 @@ struct Args {
 
     /// Number of rows in the generated image (should be odd)
     #[arg(long, default_value_t = 5)]
-    rows: i32,
+    rows: u8,
 
     /// Number of columns in the generated image (should be odd)
     #[arg(long, default_value_t = 7)]
-    cols: i32,
+    cols: u8,
 
     /// File name to save generated board to
     #[arg(long, default_value_t = String::from("target.jpg"))]
@@ -64,7 +64,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args.generate {
         export_board(&board, args.margin, args.tile_res, &args.name)?;
     } else if args.selfie {
-        take_samples(args.undistort)?;
+        take_samples(&board, args.undistort)?;
     } else if let Some(save) = args.calibrate {
         calibrate(&board, args.delay, save.as_str())?;
     }

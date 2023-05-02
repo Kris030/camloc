@@ -9,7 +9,7 @@ use opencv::{
     types,
 };
 
-fn detect_boards(
+pub fn detect_all_boards(
     board: &CharucoBoard,
     all_charuco_corners: &mut types::VectorOfVectorOfPoint2f,
     all_charuco_ids: &mut types::VectorOfVectorOfi32,
@@ -113,7 +113,7 @@ pub fn calibrate(board: &CharucoBoard, delay: i32, filename: &str) -> opencv::Re
     let mut charuco_corners = types::VectorOfVectorOfPoint2f::new();
     let mut charuco_ids = types::VectorOfVectorOfi32::new();
 
-    detect_boards(board, &mut charuco_corners, &mut charuco_ids, delay)?;
+    detect_all_boards(board, &mut charuco_corners, &mut charuco_ids, delay)?;
 
     let image_size = core::Size {
         width: 640,
