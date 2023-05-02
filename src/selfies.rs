@@ -38,7 +38,6 @@ pub fn take_samples(board: &CharucoBoard, filename: Option<String>) -> opencv::R
         if frame.size()?.width < 1 {
             continue;
         }
-        frame.copy_to(&mut draw)?;
 
         if let Some(p) = &camera_params {
             opencv::calib3d::undistort(
@@ -48,6 +47,8 @@ pub fn take_samples(board: &CharucoBoard, filename: Option<String>) -> opencv::R
                 &p.dist_coeffs,
                 &p.optimal_matrix,
             )?;
+        } else {
+            frame.copy_to(&mut draw)?;
         }
 
         if let Some(fb) = find_board(&draw, board, true)? {
