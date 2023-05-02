@@ -6,9 +6,9 @@ use opencv::{
     core, aruco::calibrate_camera_charuco, calib3d::get_optimal_new_camera_matrix,
 };
 
-pub fn generate_board(width: i32, height: i32) -> opencv::Result<CharucoBoard> {
+pub fn generate_board(width: u8, height: u8) -> opencv::Result<CharucoBoard> {
     CharucoBoard::new(
-        core::Size { width, height },
+        core::Size::new(width as i32, height as i32),
         0.04,
         0.02,
         &objdetect::get_predefined_dictionary(objdetect::PredefinedDictionaryType::DICT_4X4_50)?,
@@ -16,8 +16,7 @@ pub fn generate_board(width: i32, height: i32) -> opencv::Result<CharucoBoard> {
     )
 }
 
-pub fn find_board(board: &CharucoBoard, image: &Mat) -> opencv::Result<Option<(types::VectorOfPoint2f, types::VectorOfi32)>> {
-    let mut _rejected = types::VectorOfVectorOfPoint2f::new();
+pub fn find_board(image: &Mat, board: &CharucoBoard, include_markers: bool) -> opencv::Result<Option<FoundBoard>> {
     let marker_detector = objdetect::ArucoDetector::new(
         &objdetect::get_predefined_dictionary(objdetect::PredefinedDictionaryType::DICT_4X4_50)?,
         &objdetect::DetectorParameters::default()?,
@@ -49,7 +48,7 @@ pub fn find_board(board: &CharucoBoard, image: &Mat) -> opencv::Result<Option<(t
         &image,
         &mut marker_corners,
         &mut marker_ids,
-        &mut _rejected,
+        &mut core::no_array(),
     )?;
 
     // requires at least one detectable marker
@@ -67,10 +66,16 @@ pub fn find_board(board: &CharucoBoard, image: &Mat) -> opencv::Result<Option<(t
     )?;
 
     if ids.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some((corners, ids)))
+        return Ok(None);
     }
+
+    let markers = if include_markers {
+        Some(FoundMarkers { corners: marker_corners, ids: marker_ids })
+    } else {
+        None
+    };
+
+    Ok(Some(FoundBoard { corners, ids, markers }))
 }
 
 pub fn display_image(image: &Mat, title: &str, destroy: bool) -> opencv::Result<()> {
@@ -87,31 +92,34 @@ pub fn display_image(image: &Mat, title: &str, destroy: bool) -> opencv::Result<
     Ok(())
 }
 
-pub fn draw_boards(image: &Mat, corners: &types::VectorOfPoint2f, ids: &types::VectorOfi32) -> opencv::Result<Mat> {
-    let mut draw = image.clone();
-
-    objdetect::draw_detected_markers(
-        &mut draw,
-        &corners,
-        &ids,
-        core::Scalar::new(0.0, 255.0, 0.0, 1.0),
-    )?;
+pub fn draw_board(image: &mut Mat, board: &FoundBoard) -> opencv::Result<()> {
     objdetect::draw_detected_corners_charuco(
-        &mut draw,
-        &corners,
-        &ids,
+        image,
+        &board.corners,
+        &board.ids,
         core::Scalar::new(0.0, 0.0, 255.0, 1.0),
     )?;
-
-    Ok(draw)
+    Ok(())
+}
+pub fn draw_charuco_board(image: &mut Mat, board: &FoundBoard) -> opencv::Result<()> {
+    draw_board(image, board)?;
+    if let Some(markers) = &board.markers {
+        objdetect::draw_detected_markers(
+            image,
+            &markers.corners,
+            &markers.ids,
+            core::Scalar::new(0.0, 255.0, 0.0, 1.0),
+        )?;
+    }
+    Ok(())
 }
 
-pub fn calibrate(board: &CharucoBoard, images: &[Mat]) -> opencv::Result<CameraParams> {
+pub fn calibrate(board: &CharucoBoard, images: &[Mat]) -> opencv::Result<FullCameraInfo> {
     let (mut charuco_corners, mut charuco_ids) = (types::VectorOfVectorOfPoint2f::new(), types::VectorOfVectorOfi32::new());
     for img in images {
-        if let Some((cs, ids)) = find_board(board, img)? {
-            charuco_corners.push(cs);
-            charuco_ids.push(ids);
+        if let Some(fb) = find_board(img, board, false)? {
+            charuco_corners.push(fb.corners);
+            charuco_ids.push(fb.ids);
         }
     }
 
@@ -161,10 +169,12 @@ pub fn calibrate(board: &CharucoBoard, images: &[Mat]) -> opencv::Result<CameraP
 
     let [horizontal, vertical] = cam.get_fov()?.0;
 
-    Ok(CameraParams {
-        camera_matrix,
-        dist_coeffs,
-        optimal_matrix,
+    Ok(FullCameraInfo {
+        params: CameraParams {
+            camera_matrix,
+            dist_coeffs,
+            optimal_matrix,
+        },
         fov: CameraFOV { horizontal, vertical }
     })
 }
@@ -178,5 +188,20 @@ pub struct CameraParams {
     pub optimal_matrix: Mat,
     pub camera_matrix: Mat,
     pub dist_coeffs: Mat,
+}
+
+pub struct FullCameraInfo {
+    pub params: CameraParams,
     pub fov: CameraFOV,
+}
+
+pub struct FoundBoard {
+    corners: types::VectorOfPoint2f,
+    ids: types::VectorOfi32,
+    markers: Option<FoundMarkers>,
+}
+
+pub struct FoundMarkers {
+    corners: types::VectorOfVectorOfPoint2f,
+    ids: types::VectorOfi32,
 }
