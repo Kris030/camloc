@@ -168,11 +168,11 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, BUFFER_SIZE> {
 
         let mut uncalibrated = if uncalibrated {
             println!("Starting calibration");
-            let width: u16 = get_from_stdin("  Charuco board width: ")?;
-            let height: u16 = get_from_stdin("  Charuco board height: ")?;
+            let width: u8 = get_from_stdin("  Charuco board width: ")?;
+            let height: u8 = get_from_stdin("  Charuco board height: ")?;
 
             Some((
-                calibration::generate_board(width as i32, height as i32)
+                calibration::generate_board(width, height)
                     .map_err(|_| "Couldn't create charuco board")?,
                 vec![]
             ))
@@ -193,11 +193,12 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, BUFFER_SIZE> {
             self.sock.set_read_timeout(timeout).map_err(|_| "Couldn't set timeout???")?;
 
             if let Some((board, imgs)) = &mut uncalibrated {
-                let detection = calibration::find_board(board, &img)
+                let detection = calibration::find_board(&img, board, false)
                     .map_err(|_| "Couldn't find board")?;
 
-                if let Some((cs, ids)) = detection {
-                    let drawn_boards = calibration::draw_boards(&img, &cs, &ids)
+                if let Some(fb) = detection {
+                    let mut drawn_boards = img.clone();
+                    calibration::draw_board(&mut drawn_boards, &fb)
                         .map_err(|_| "Couldn't draw detected boards")?;
                     display_image(&drawn_boards, "recieved", false)
                         .map_err(|_| "Couldn't display image")?;
@@ -206,9 +207,16 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, BUFFER_SIZE> {
                     if keep {
                         imgs.push(img);
                     }
+
+                    if imgs.is_empty() {
+                        println!("  You can't calibrate with no images");
+                        continue;
+                    }
                 } else {
                     display_image(&img, "recieved", false)
                         .map_err(|_| "Couldn't display image")?;
+
+                    print!("  Board not found\n  ");
                 }
             } else {
                 display_image(&img, "recieved", false)
