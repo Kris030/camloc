@@ -152,22 +152,17 @@ pub fn calibrate(board: &CharucoBoard, delay: i32, filename: &str) -> opencv::Re
         false,
     )?;
 
-    save_camera_params(filename, &camera_matrix, &dist_coeffs, &optimal_matrix)?;
+    save_camera_params(filename, &CameraParams { camera_matrix, dist_coeffs, optimal_matrix })?;
 
     Ok(())
 }
 
-pub fn save_camera_params(
-    filename: &str,
-    camera_matrix: &Mat,
-    dist_coeffs: &Mat,
-    optimal_matrix: &Mat,
-) -> opencv::Result<()> {
+pub fn save_camera_params(filename: &str, params: &CameraParams) -> opencv::Result<()> {
     let mut fs = FileStorage::new(filename, core::FileStorage_WRITE, "")?;
 
-    fs.write_mat("camera_matrix", camera_matrix)?;
-    fs.write_mat("dist_coeffs", dist_coeffs)?;
-    fs.write_mat("optimal_matrix", optimal_matrix)?;
+    fs.write_mat("camera_matrix", &params.camera_matrix)?;
+    fs.write_mat("dist_coeffs", &params.dist_coeffs)?;
+    fs.write_mat("optimal_matrix", &params.optimal_matrix)?;
 
     fs.release()?;
     Ok(())
