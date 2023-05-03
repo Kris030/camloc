@@ -1,11 +1,12 @@
-use std::{mem::size_of, ops::Range};
+use std::mem::size_of;
 
 use opencv::{
+    aruco::calibrate_camera_charuco,
+    calib3d::get_optimal_new_camera_matrix,
+    core, highgui,
     objdetect::{self, CharucoBoard, CharucoDetector, CharucoParameters},
     prelude::*,
-    highgui,
     types,
-    core, aruco::calibrate_camera_charuco, calib3d::get_optimal_new_camera_matrix,
 };
 
 pub fn generate_board(width: u8, height: u8) -> opencv::Result<CharucoBoard> {
@@ -18,7 +19,11 @@ pub fn generate_board(width: u8, height: u8) -> opencv::Result<CharucoBoard> {
     )
 }
 
-pub fn find_board(image: &Mat, board: &CharucoBoard, include_markers: bool) -> opencv::Result<Option<FoundBoard>> {
+pub fn find_board(
+    image: &Mat,
+    board: &CharucoBoard,
+    include_markers: bool,
+) -> opencv::Result<Option<FoundBoard>> {
     let marker_detector = objdetect::ArucoDetector::new(
         &objdetect::get_predefined_dictionary(objdetect::PredefinedDictionaryType::DICT_4X4_50)?,
         &objdetect::DetectorParameters::default()?,
@@ -72,21 +77,25 @@ pub fn find_board(image: &Mat, board: &CharucoBoard, include_markers: bool) -> o
     }
 
     let markers = if include_markers {
-        Some(FoundMarkers { corners: marker_corners, ids: marker_ids })
+        Some(FoundMarkers {
+            corners: marker_corners,
+            ids: marker_ids,
+        })
     } else {
         None
     };
 
-    Ok(Some(FoundBoard { corners, ids, markers }))
+    Ok(Some(FoundBoard {
+        corners,
+        ids,
+        markers,
+    }))
 }
 
 pub fn display_image(image: &Mat, title: &str, destroy: bool) -> opencv::Result<()> {
     highgui::imshow(title, image)?;
 
-    while !matches!(
-        highgui::wait_key(0),
-        Err(_) | Ok(113)
-    ) {}
+    while !matches!(highgui::wait_key(0), Err(_) | Ok(113)) {}
 
     if destroy {
         highgui::destroy_window(title)?;
@@ -117,7 +126,10 @@ pub fn draw_charuco_board(image: &mut Mat, board: &FoundBoard) -> opencv::Result
 }
 
 pub fn calibrate(board: &CharucoBoard, images: &[Mat]) -> opencv::Result<FullCameraInfo> {
-    let (mut charuco_corners, mut charuco_ids) = (types::VectorOfVectorOfPoint2f::new(), types::VectorOfVectorOfi32::new());
+    let (mut charuco_corners, mut charuco_ids) = (
+        types::VectorOfVectorOfPoint2f::new(),
+        types::VectorOfVectorOfi32::new(),
+    );
     for img in images {
         if let Some(fb) = find_board(img, board, false)? {
             charuco_corners.push(fb.corners);
@@ -161,7 +173,8 @@ pub fn calibrate(board: &CharucoBoard, images: &[Mat]) -> opencv::Result<FullCam
         false,
     )?;
 
-    let k = camera_matrix.to_vec_2d::<f64>()?
+    let k = camera_matrix
+        .to_vec_2d::<f64>()?
         .into_iter()
         .flatten()
         .collect::<Vec<f64>>();
@@ -186,62 +199,71 @@ pub struct CameraParams {
     pub optimal_matrix: Mat,
     /// f64 | 3x3
     pub camera_matrix: Mat,
-    /// f64 | max 12
+    /// f64 | 4, 5, 8 or 12
     pub dist_coeffs: Mat,
 }
 
 impl FullCameraInfo {
     pub fn to_be_bytes(&self) -> Vec<u8> {
-        let om = self.params.optimal_matrix.to_vec_2d::<f64>().unwrap()
-            .into_iter().flatten()
+        let om = self
+            .params
+            .optimal_matrix
+            .to_vec_2d::<f64>()
+            .unwrap()
+            .into_iter()
+            .flatten()
             .flat_map(f64::to_be_bytes);
-        let cm = self.params.camera_matrix.to_vec_2d::<f64>().unwrap()
-            .into_iter().flatten()
+        let cm = self
+            .params
+            .camera_matrix
+            .to_vec_2d::<f64>()
+            .unwrap()
+            .into_iter()
+            .flatten()
             .flat_map(f64::to_be_bytes);
 
         let dclen = (self.params.dist_coeffs.rows() as u8)
-            .to_be_bytes().into_iter();
-        let dc = self.params.dist_coeffs.iter::<f64>().unwrap()
+            .to_be_bytes()
+            .into_iter();
+        let dc = self
+            .params
+            .dist_coeffs
+            .iter::<f64>()
+            .unwrap()
             .map(|a| a.1)
             .flat_map(f64::to_be_bytes);
-        
-        om.chain(cm)
-            .chain(dclen)
-            .chain(dc)
-            .collect()
+
+        om.chain(cm).chain(dclen).chain(dc).collect()
     }
-    pub fn from_be_bytes(bytes: &[u8]) -> Self {
+
+    pub fn from_be_bytes(r: &mut impl std::io::Read) -> Result<Self, std::io::Error> {
         const MAT3X3_SIZE: usize = 3 * 3 * size_of::<f64>();
-        const OM_RANGE: Range<usize> = 0..MAT3X3_SIZE;
-        let om = Mat::from_slice_rows_cols(&bytes[OM_RANGE], 3, 3).unwrap();
+        let mut buf = [0; 12 * 8];
 
-        const CM_RANGE: Range<usize> = OM_RANGE.end..OM_RANGE.end + MAT3X3_SIZE;
-        let cm = Mat::from_slice_rows_cols(&bytes[CM_RANGE], 3, 3).unwrap();
+        r.read_exact(&mut buf[..MAT3X3_SIZE])?;
+        let optimal_matrix = Mat::from_slice_rows_cols(&buf[..MAT3X3_SIZE], 3, 3).unwrap();
 
-        const CL_POS: usize = CM_RANGE.end;
-        let cl = bytes[CL_POS] as usize;
+        r.read_exact(&mut buf[..MAT3X3_SIZE])?;
+        let camera_matrix = Mat::from_slice_rows_cols(&buf[..MAT3X3_SIZE], 3, 3).unwrap();
 
-        let dc_range = CL_POS + 1..CL_POS + 1 + cl;
-        let dc_range_end = dc_range.end;
+        r.read_exact(&mut buf[..1])?;
+        let cl = buf[0] as usize;
 
-        let dc = &bytes[dc_range];
-        let dc: Vec<f64> = dc
-            .windows(size_of::<f64>())
-            .map(|w| f64::from_be_bytes(w.to_vec().try_into().unwrap()))
-            .collect();
-        let dc = Mat::from_slice(&dc).unwrap();
+        r.read_exact(&mut buf[..cl])?;
+        let dist_coeffs = Mat::from_slice(&buf[..cl]).unwrap();
 
-        let fov_range = dc_range_end..dc_range_end + size_of::<f64>();
-        let horizontal_fov = f64::from_be_bytes(bytes[fov_range].to_vec().try_into().unwrap());
+        r.read_exact(&mut buf[..size_of::<f64>()])?;
+        let horizontal_fov =
+            f64::from_be_bytes(buf[..size_of::<f64>()].to_vec().try_into().unwrap());
 
-        Self {
+        Ok(Self {
             horizontal_fov,
             params: CameraParams {
-                optimal_matrix: om,
-                camera_matrix: cm,
-                dist_coeffs: dc,
+                optimal_matrix,
+                camera_matrix,
+                dist_coeffs,
             },
-        }
+        })
     }
 }
 

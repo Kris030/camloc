@@ -1,9 +1,9 @@
 pub mod calibration;
-pub mod position;
 pub mod hosts;
+pub mod position;
 
 pub trait Lerp {
-	fn lerp(s: &Self, e: &Self, t: f64) -> Self;
+    fn lerp(s: &Self, e: &Self, t: f64) -> Self;
 }
 
 impl Lerp for f64 {
@@ -19,7 +19,10 @@ pub struct GenerationalValue<T> {
 }
 impl<T> GenerationalValue<T> {
     pub const fn new(value: T) -> Self {
-        Self { generation: 0, value }
+        Self {
+            generation: 0,
+            value,
+        }
     }
     pub const fn new_with_generation(value: T, generation: usize) -> Self {
         Self { generation, value }
@@ -46,12 +49,15 @@ pub fn get_from_stdin<T: std::str::FromStr>(prompt: &str) -> Result<T, &'static 
     use std::io::Write;
 
     let mut stdout = std::io::stdout().lock();
-    stdout.write_all(prompt.as_bytes()).map_err(|_| "Failed to write prompt")?;
+    stdout
+        .write_all(prompt.as_bytes())
+        .map_err(|_| "Failed to write prompt")?;
     stdout.flush().map_err(|_| "Failed to flush stdout")?;
     drop(stdout);
 
     let mut l = String::new();
-    std::io::stdin().read_line(&mut l)
+    std::io::stdin()
+        .read_line(&mut l)
         .map_err(|_| "Couldn't get line")?;
 
     l.get(..(l.len() - 1))
