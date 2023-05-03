@@ -52,8 +52,7 @@ impl Aruco {
 
         let bounding = self.corners.get(index)?;
         let center = util::avg_corners(&bounding);
-        let brect = util::bounding_to_rect(&bounding, 0)
-            .expect("No bounding rect?");
+        let brect = util::bounding_to_rect(&bounding, 0).expect("No bounding rect?");
 
         if let Some(rect) = rect {
             rect.clone_from(&brect);

@@ -46,7 +46,7 @@ pub fn draw_bounds(
     let mut vec = bounding.to_vec();
     vec.push(
         *vec.first()
-            .ok_or(opencv::Error::new(core::StsVecLengthErr, "Wut du heell?"))?
+            .ok_or(opencv::Error::new(core::StsVecLengthErr, "Wut du heell?"))?,
     );
     for p in vec.windows(2) {
         imgproc::line(
