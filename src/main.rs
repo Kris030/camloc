@@ -14,8 +14,8 @@ use opencv::{prelude::*, imgcodecs, core};
 use scanning::IPV4AddressTemplate;
 
 pub(crate) struct Host {
-    pub(crate) status: HostStatus,
-    pub(crate) ip: IpAddr,
+    pub status: HostStatus,
+    pub ip: IpAddr,
 }
 
 fn get_own_ip() -> Result<Addr, String> {
@@ -45,22 +45,21 @@ fn get_own_ip() -> Result<Addr, String> {
         .ok_or("Invalid index".to_string())
 }
 
-#[derive(Clone, Copy)]
 enum SetupType {
-    Square { side_length: f64, fov: Option<f64> },
+    Square { side_length: f64 },
     Free,
 }
 
 impl SetupType {
-    fn select_camera_position(&self) -> Result<Position, &'static str> {
+    fn select_camera_position(&self, fov: f64) -> Result<Position, &'static str> {
         println!("Enter camera position");
         Ok(match self {
-            SetupType::Square { side_length, fov } => {
+            SetupType::Square { side_length } => {
                 calc_posotion_in_square_distance(
                     get_from_stdin("  Camera index")?,
                     get_camera_distance_in_square(
                         *side_length,
-                        fov.ok_or("Unknown fov for square setup")?
+                        fov
                     ),
                 )
             },
@@ -79,7 +78,6 @@ fn get_setup_type() -> Result<SetupType, &'static str> {
     match get_from_stdin("Select setup type square (0) / free (1): ")? {
         0 => Ok(SetupType::Square {
             side_length: get_from_stdin("Enter side length: ")?,
-            fov: None,
         }),
 
         1 => Ok(SetupType::Free),
@@ -235,32 +233,29 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, BUFFER_SIZE> {
         let ip_bytes = server_ip.as_bytes();
         let ip_len = ip_bytes.len() as u16;
         
-        let mut buff = vec![];
-
-        let (pos, fov) = if let Some((board, imgs)) = &uncalibrated {
+        let buff = if let Some((board, imgs)) = &uncalibrated {
             let calib = calibration::calibrate(board, imgs).map_err(|_| "Couldn't calibrate")?;
-            let fov = calib.fov.horizontal;
-            if let SetupType::Square { fov: sfov, .. } = &mut self.setup_type {
-                *sfov = Some(fov);
-            }
-            let pos = self.setup_type.select_camera_position()?;
+            let pos = self.setup_type.select_camera_position(calib.horizontal_fov)?;
 
-            (pos, fov)
+            vec![
+                pos.x.to_be_bytes().as_slice(),
+                pos.y.to_be_bytes().as_slice(),
+                pos.rotation.to_be_bytes().as_slice(),
+                ip_len.to_be_bytes().as_slice(),
+                ip_bytes,
+                calib.to_be_bytes().as_slice(),
+            ].concat()
         } else {
-            let pos = self.setup_type.select_camera_position()?;
-            (pos, f64::NAN)
+            let pos = self.setup_type.select_camera_position(f64::NAN)?;
+
+            vec![
+                pos.x.to_be_bytes().as_slice(),
+                pos.y.to_be_bytes().as_slice(),
+                pos.rotation.to_be_bytes().as_slice(),
+                ip_len.to_be_bytes().as_slice(),
+                ip_bytes,
+            ].concat()
         };
-
-        buff.copy_from_slice(&pos.x.to_be_bytes());
-        buff.copy_from_slice(&pos.y.to_be_bytes());
-        buff.copy_from_slice(&pos.rotation.to_be_bytes());
-
-        if uncalibrated.is_some() {
-            buff.copy_from_slice(&fov.to_be_bytes());
-        }
-
-        buff.copy_from_slice(&ip_len.to_be_bytes());
-        buff.copy_from_slice(ip_bytes);
 
         self.sock.send_to(&buff, addr)
             .map_err(|_| "Couldn't send position info and server address")?;
