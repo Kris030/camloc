@@ -1,10 +1,13 @@
 use camloc_server::{
-    extrapolations::{LinearExtrapolation, Extrapolation},
-    service::{LocationService, TimedPosition},
     calc::PlacedCamera,
+    extrapolations::{Extrapolation, LinearExtrapolation},
+    service::{LocationService, TimedPosition},
 };
-use tokio::{time::sleep, sync::oneshot::{Sender, Receiver, self}};
 use std::time::Duration;
+use tokio::{
+    sync::oneshot::{self, Receiver, Sender},
+    time::sleep,
+};
 
 fn main() {
     if let Err(e) = run() {
@@ -35,18 +38,20 @@ async fn send_camera(address: String, camera: PlacedCamera) -> tokio::io::Result
 #[tokio::main]
 async fn run() -> Result<(), String> {
     let location_service = LocationService::start(
-        Some(
-            Extrapolation::new::<LinearExtrapolation>(
-                Duration::from_millis(500)
-            )
-        ), camloc_common::hosts::constants::MAIN_PORT
-    ).await?;
+        Some(Extrapolation::new::<LinearExtrapolation>(
+            Duration::from_millis(500),
+        )),
+        camloc_common::hosts::constants::MAIN_PORT,
+    )
+    .await?;
 
-    location_service.subscribe_connection(|address, camera| {
-        let address = address.to_string();
-        println!("New camera connected from {address}");
-        tokio::spawn(async move { send_camera(address, camera).await });
-    }).await;
+    location_service
+        .subscribe_connection(|address, camera| {
+            let address = address.to_string();
+            println!("New camera connected from {address}");
+            tokio::spawn(async move { send_camera(address, camera).await });
+        })
+        .await;
 
     async fn write_to_stderr_binary(p: TimedPosition) {
         use tokio::io::{stderr, AsyncWriteExt};
@@ -54,13 +59,11 @@ async fn run() -> Result<(), String> {
         println!("{p}");
 
         let mut buf = 0i32.to_be_bytes().to_vec();
-        buf.append(&mut [
-            p.position.x.to_be_bytes(),
-            p.position.y.to_be_bytes(),
-        ].concat());
+        buf.append(&mut [p.position.x.to_be_bytes(), p.position.y.to_be_bytes()].concat());
 
         stderr()
-            .write_all(&buf[..]).await
+            .write_all(&buf[..])
+            .await
             .expect("Couldn't write coords to stderr???");
     }
 
@@ -82,9 +85,11 @@ async fn run() -> Result<(), String> {
     let _ = ctrlc::set_handler(ctrlc_handler);
 
     if true {
-        location_service.subscribe(|p| {
-            tokio::spawn(write_to_stderr_binary(p));
-        }).await;
+        location_service
+            .subscribe(|p| {
+                tokio::spawn(write_to_stderr_binary(p));
+            })
+            .await;
 
         rx.await.map_err(|_| "Something failed in the channel")?;
         location_service.stop().await;

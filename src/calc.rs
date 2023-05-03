@@ -23,9 +23,9 @@ impl Setup {
         Self { cameras: vec![] }
     }
 
-	pub fn new_freehand(cameras: Vec<PlacedCamera>) -> Self {
-		Self { cameras }
-	}
+    pub fn new_freehand(cameras: Vec<PlacedCamera>) -> Self {
+        Self { cameras }
+    }
 
     pub fn new_square(square_size: f64, fovs: Vec<f64>) -> Self {
         let c = fovs.len();
@@ -35,7 +35,7 @@ impl Setup {
         );
 
         let mut hmap: HashMap<u64, f64> = HashMap::new();
-        
+
         let mut ind = 0;
         let cameras = fovs
             .into_iter()
@@ -44,7 +44,10 @@ impl Setup {
                 let d = match hmap.get(&bits) {
                     Some(v) => *v,
                     None => {
-                        let v = camloc_common::position::get_camera_distance_in_square(square_size, fov);
+                        let v = camloc_common::position::get_camera_distance_in_square(
+                            square_size,
+                            fov,
+                        );
                         hmap.insert(fov.to_bits(), v);
                         v
                     }
@@ -53,12 +56,9 @@ impl Setup {
                 let pos = camloc_common::position::calc_posotion_in_square_distance(ind, d);
                 ind += 1;
 
-                PlacedCamera::new(
-                    pos,
-                    fov,
-                )
-            }
-        ).collect();
+                PlacedCamera::new(pos, fov)
+            })
+            .collect();
 
         Self { cameras }
     }
@@ -73,7 +73,7 @@ impl Setup {
         for i in 0..c {
             if let Some(x) = pxs[i] {
                 tangents[i] = Some(
-                    (self.cameras[i].position.rotation + (self.cameras[i].fov * (0.5 - x))).tan()
+                    (self.cameras[i].position.rotation + (self.cameras[i].fov * (0.5 - x))).tan(),
                 );
                 lines += 1;
             }
