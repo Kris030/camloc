@@ -1,3 +1,5 @@
+use std::{mem::size_of, ops::Range};
+
 use opencv::{
     objdetect::{self, CharucoBoard, CharucoDetector, CharucoParameters},
     prelude::*,
@@ -167,7 +169,7 @@ pub fn calibrate(board: &CharucoBoard, images: &[Mat]) -> opencv::Result<FullCam
     let k = core::Matx::from_array(k);
     let cam = opencv::viz::Camera::new_2(k, image_size)?;
 
-    let [horizontal, vertical] = cam.get_fov()?.0;
+    let [horizontal_fov, _] = cam.get_fov()?.0;
 
     Ok(FullCameraInfo {
         params: CameraParams {
@@ -175,24 +177,77 @@ pub fn calibrate(board: &CharucoBoard, images: &[Mat]) -> opencv::Result<FullCam
             dist_coeffs,
             optimal_matrix,
         },
-        fov: CameraFOV { horizontal, vertical }
+        horizontal_fov,
     })
 }
 
-pub struct CameraFOV {
-    pub horizontal: f64,
-    pub vertical: f64,  
+pub struct CameraParams {
+    /// f64 | 3x3
+    pub optimal_matrix: Mat,
+    /// f64 | 3x3
+    pub camera_matrix: Mat,
+    /// f64 | max 12
+    pub dist_coeffs: Mat,
 }
 
-pub struct CameraParams {
-    pub optimal_matrix: Mat,
-    pub camera_matrix: Mat,
-    pub dist_coeffs: Mat,
+impl FullCameraInfo {
+    pub fn to_be_bytes(&self) -> Vec<u8> {
+        let om = self.params.optimal_matrix.to_vec_2d::<f64>().unwrap()
+            .into_iter().flatten()
+            .flat_map(f64::to_be_bytes);
+        let cm = self.params.camera_matrix.to_vec_2d::<f64>().unwrap()
+            .into_iter().flatten()
+            .flat_map(f64::to_be_bytes);
+
+        let dclen = (self.params.dist_coeffs.rows() as u8)
+            .to_be_bytes().into_iter();
+        let dc = self.params.dist_coeffs.iter::<f64>().unwrap()
+            .map(|a| a.1)
+            .flat_map(f64::to_be_bytes);
+        
+        om.chain(cm)
+            .chain(dclen)
+            .chain(dc)
+            .collect()
+    }
+    pub fn from_be_bytes(bytes: &[u8]) -> Self {
+        const MAT3X3_SIZE: usize = 3 * 3 * size_of::<f64>();
+        const OM_RANGE: Range<usize> = 0..MAT3X3_SIZE;
+        let om = Mat::from_slice_rows_cols(&bytes[OM_RANGE], 3, 3).unwrap();
+
+        const CM_RANGE: Range<usize> = OM_RANGE.end..OM_RANGE.end + MAT3X3_SIZE;
+        let cm = Mat::from_slice_rows_cols(&bytes[CM_RANGE], 3, 3).unwrap();
+
+        const CL_POS: usize = CM_RANGE.end;
+        let cl = bytes[CL_POS] as usize;
+
+        let dc_range = CL_POS + 1..CL_POS + 1 + cl;
+        let dc_range_end = dc_range.end;
+
+        let dc = &bytes[dc_range];
+        let dc: Vec<f64> = dc
+            .windows(size_of::<f64>())
+            .map(|w| f64::from_be_bytes(w.to_vec().try_into().unwrap()))
+            .collect();
+        let dc = Mat::from_slice(&dc).unwrap();
+
+        let fov_range = dc_range_end..dc_range_end + size_of::<f64>();
+        let horizontal_fov = f64::from_be_bytes(bytes[fov_range].to_vec().try_into().unwrap());
+
+        Self {
+            horizontal_fov,
+            params: CameraParams {
+                optimal_matrix: om,
+                camera_matrix: cm,
+                dist_coeffs: dc,
+            },
+        }
+    }
 }
 
 pub struct FullCameraInfo {
     pub params: CameraParams,
-    pub fov: CameraFOV,
+    pub horizontal_fov: f64,
 }
 
 pub struct FoundBoard {

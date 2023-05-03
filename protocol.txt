@@ -32,9 +32,16 @@ outer loop
 		if done [RECV Command::ImagesDone]
 			break
 	if calibrated
-  		recieve camera info (without fov) and server ip [RECV x: f64, y: f64, rotation: f64, ip_len: u16, ip: [u8]]
+  		recieve camera info, server ip [RECV x: f64, y: f64, rotation: f64, ip_len: u16, ip: [u8]]
  	if not calibrated
-		recieve camera info (with fov) and server ip [RECV x: f64, y: f64, rotation: f64, fov: f64, ip_len: u16, ip: [u8]]
+		recieve camera info, server ip, calibration [RECV
+			x: f64, y: f64, rotation: f64,
+			ip_len: u16, ip: [u8],
+			optimal_matrix: [f64; 9],
+			camera_matrix: [f64; 9],
+			distance_coefficients_len: u8,
+			distance_coefficients: [f64]
+		]
 	connect [SEND Command::Connect, x: f64, y: f64, rotation: f64, fov: f64]
 	inner loop
 		receive message
@@ -66,7 +73,18 @@ loop
 				show image to user
 				if user wants to quit
 					send stream stop [SEND Command::ImagesDone]
-		prompt user for position (and calibrate if needed)
-		send info and server ip [SEND x: f64, y: f64, rotation: f64, fov: f64, ip_len: u16, ip: [u8]]
+		prompt user for position
+		if calibrated
+			send info [SEND x: f64, y: f64, rotation: f64, fov: f64, ip_len: u16, ip: [u8]]
+		else
+			calibrate
+			send info [SEND
+				x: f64, y: f64, rotation: f64,
+				ip_len: u16, ip: [u8],
+				optimal_matrix: [f64; 9],
+				camera_matrix: [f64; 9],
+				distance_coefficients_len: u8,
+				distance_coefficients: [f64]
+			]
 	if client stop
 		send stop [SEND Command::Stop]
