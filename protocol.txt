@@ -1,40 +1,45 @@
-NOTICE
+NOTICE:
 
 - values are all big-endian
+- ports:
+	- M = main
+	- S = starter
+	- ? = sender
+	- * = any
 
 
 SERVER
 
 loop
 	recieve message
-		if ping [RECV Command::Ping]
-			reply with status [SEND HostStatus::Server(ServerStatus::Running)]
-		if client connect [RECV Command::Connect, x: f64, y: f64, rotation: f64, fov: f64]
+		if ping [RECV UDP:M Command::Ping]
+			reply with status [SEND UDP:M->M HostStatus::Server(ServerStatus::Running)]
+		if client connect [RECV UDP:M Command::Connect, x: f64, y: f64, rotation: f64, fov: f64]
 			accept, add to clients
-		if value update [RECV Command::UpdateValue, value: f64]
+		if value update [RECV UDP:M Command::UpdateValue, value: f64]
 			update value
 			if all values updated
 				calculate new position
 				notify subscribers
-kill all clients [SEND Command::Kill]
+kill all clients [SEND UDP:M->M Command::Kill]
 
 CLIENT
 
 outer loop
-	wait for ping [RECV Command::Ping]
-	reply with status [SEND HostStatus(ClientStatus::Idle)]
-	wait for organizer start [RECV Command::Start]
+	wait for ping [RECV UDP:M Command::Ping]
+	reply with status [SEND UDP:M->? HostStatus(ClientStatus::Idle)]
+	wait for organizer start [RECV TCP:S Command::Start]
 	loop
 		receive message
-		if image request [RECV Command::RequestImage]
-   			send image from camera [SEND len: u64, img: [u8]]
+		if image request [RECV TCP:S Command::RequestImage]
+   			send image from camera [SEND TCP:S->? len: u64, img: [u8]]
    			continue
-		if done [RECV Command::ImagesDone]
+		if done [RECV TCP:S Command::ImagesDone]
 			break
 	if calibrated
-  		recieve camera info, server ip [RECV x: f64, y: f64, rotation: f64, ip_len: u16, ip: [u8]]
+  		recieve camera info, server ip [RECV TCP:S x: f64, y: f64, rotation: f64, ip_len: u16, ip: [u8]]
  	if not calibrated
-		recieve camera info, server ip, calibration [RECV
+		recieve camera info, server ip, calibration [RECV TCP:S
 			x: f64, y: f64, rotation: f64,
 			ip_len: u16, ip: [u8],
 			optimal_matrix: [f64; 9],
@@ -42,43 +47,43 @@ outer loop
 			distance_coefficients_len: u8,
 			distance_coefficients: [f64]
 		]
-	connect [SEND Command::Connect, x: f64, y: f64, rotation: f64, fov: f64]
+	connect [SEND UDP:M->M Command::Connect, x: f64, y: f64, rotation: f64, fov: f64]
 	inner loop
 		receive message
-			if stop [RECV Command::Stop]
+			if stop [RECV UDP:M Command::Stop]
 				break (inner)
-			if ping [RECV Command::Ping]
+			if ping [RECV UDP:M Command::Ping]
 				reply with status [SEND HostStatus(ClientStatus::Running)]
 		find x value
-		send value to server [SEND Command::UpdateValue, value: f64]
+		send value to server [SEND UDP:M->M Command::UpdateValue, value: f64]
 
 
 ORGANIZER
 
 loop
 	loop through ips
-		send ping [SEND Command::Ping]
+		send ping [SEND UDP:*->M Command::Ping]
 		if offline
 			continue
-		if server [RECV HostStatus::Server]
+		if server [RECV UDP:* HostStatus::Server]
 			set server ip
-		if client [RECV HostStatus::Client | HostStatus::ConfiglessClient]
+		if client [RECV UDP:* HostStatus::Client | HostStatus::ConfiglessClient]
 			update client status
  get user action
 	if client start
-		send start [SEND Command::Start]
+		send start [SEND TCP:*->S Command::Start]
 		loop
-			send image request [SEND Command::RequestImage]
-			recieve jpg image [RECV len: u64, bytes: [u8]]
+			send image request [SEND TCP:*->S Command::RequestImage]
+			recieve jpg image [RECV TCP:* len: u64, bytes: [u8]]
 				show image to user
 				if user wants to quit
-					send stream stop [SEND Command::ImagesDone]
+					send stream stop [SEND TCP:*->S Command::ImagesDone]
 		prompt user for position
 		if calibrated
-			send info [SEND x: f64, y: f64, rotation: f64, fov: f64, ip_len: u16, ip: [u8]]
+			send info [SEND TCP:*->S x: f64, y: f64, rotation: f64, fov: f64, ip_len: u16, ip: [u8]]
 		else
 			calibrate
-			send info [SEND
+			send info [SEND TCP:*->S
 				x: f64, y: f64, rotation: f64,
 				ip_len: u16, ip: [u8],
 				optimal_matrix: [f64; 9],
@@ -87,4 +92,5 @@ loop
 				distance_coefficients: [f64]
 			]
 	if client stop
-		send stop [SEND Command::Stop]
+		send stop [SEND UDP:*->M Command::Stop]
+
