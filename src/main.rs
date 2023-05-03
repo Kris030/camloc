@@ -4,10 +4,10 @@ mod selfies;
 
 use crate::generate::export_board;
 
-use camloc_common::calibration::generate_board;
-use selfies::take_samples;
 use calibrate::calibrate;
+use camloc_common::calibration::generate_board;
 use clap::Parser;
+use selfies::take_samples;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]

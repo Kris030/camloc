@@ -1,13 +1,12 @@
 use camloc_common::calibration::CameraParams;
 use opencv::{
-    objdetect::{self, CharucoDetector, CharucoParameters, CharucoBoard},
-    core::{self, FileStorage, TermCriteria},
-    calib3d::get_optimal_new_camera_matrix, 
     aruco::calibrate_camera_charuco,
-    prelude::*,
+    calib3d::get_optimal_new_camera_matrix,
+    core::{self, FileStorage, TermCriteria},
     highgui,
-    videoio,
-    types,
+    objdetect::{self, CharucoBoard, CharucoDetector, CharucoParameters},
+    prelude::*,
+    types, videoio,
 };
 
 pub fn detect_all_boards(
@@ -152,7 +151,14 @@ pub fn calibrate(board: &CharucoBoard, delay: i32, filename: &str) -> opencv::Re
         false,
     )?;
 
-    save_camera_params(filename, &CameraParams { camera_matrix, dist_coeffs, optimal_matrix })?;
+    save_camera_params(
+        filename,
+        &CameraParams {
+            camera_matrix,
+            dist_coeffs,
+            optimal_matrix,
+        },
+    )?;
 
     Ok(())
 }
@@ -175,10 +181,18 @@ pub fn load_camera_params(filename: &str) -> opencv::Result<CameraParams> {
     let mut dist_coeffs = Mat::default();
     let mut optimal_matrix = Mat::default();
 
-    fs.get("camera_matrix")?.mat()?.copy_to(&mut camera_matrix)?;
+    fs.get("camera_matrix")?
+        .mat()?
+        .copy_to(&mut camera_matrix)?;
     fs.get("dist_coeffs")?.mat()?.copy_to(&mut dist_coeffs)?;
-    fs.get("optimal_matrix")?.mat()?.copy_to(&mut optimal_matrix)?;
+    fs.get("optimal_matrix")?
+        .mat()?
+        .copy_to(&mut optimal_matrix)?;
 
     fs.release()?;
-    Ok(CameraParams { optimal_matrix, camera_matrix, dist_coeffs })
+    Ok(CameraParams {
+        optimal_matrix,
+        camera_matrix,
+        dist_coeffs,
+    })
 }

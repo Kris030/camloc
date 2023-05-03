@@ -1,9 +1,4 @@
-use opencv::{
-    objdetect::CharucoBoard,
-    prelude::*,
-    imgcodecs,
-    core,
-};
+use opencv::{core, imgcodecs, objdetect::CharucoBoard, prelude::*};
 
 pub fn export_board(
     board: &CharucoBoard,

@@ -1,5 +1,5 @@
-use opencv::{highgui, imgcodecs, prelude::*, videoio, objdetect::CharucoBoard};
-use camloc_common::calibration::{find_board, draw_charuco_board};
+use camloc_common::calibration::{draw_charuco_board, find_board};
+use opencv::{highgui, imgcodecs, objdetect::CharucoBoard, prelude::*, videoio};
 
 use crate::calibrate::load_camera_params;
 
