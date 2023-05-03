@@ -2,7 +2,7 @@ use camloc_common::{GenerationalValue, position::Position, hosts::{Command, Host
 use std::{sync::Arc, time::{Instant, Duration}, f64::NAN, fmt::{Debug, Display}, mem, net::SocketAddr};
 use tokio::{net::UdpSocket, spawn, sync::{RwLock, Mutex}, task::JoinHandle};
 
-use crate::{calc::{Setup, PlacedCamera, CameraInfo}, extrapolations::Extrapolation};
+use crate::{calc::{Setup, PlacedCamera}, extrapolations::Extrapolation};
 
 static DATA_VALIDITY: Duration = Duration::from_millis(500);
 
@@ -180,8 +180,8 @@ impl LocationService {
 					));
 
 					let cam = PlacedCamera::new(
-						CameraInfo::new(f),
 						Position::new(x, y, r),
+						f,
 					);
 					self.setup.write().await.cameras.push(cam);
 

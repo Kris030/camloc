@@ -1,4 +1,4 @@
-use camloc_server::calc::{Setup, CameraInfo};
+use camloc_server::calc::Setup;
 
 fn main() {
 	let args: Vec<String> = std::env::args()
@@ -9,9 +9,7 @@ fn main() {
 	let server_addr = "127.0.0.1";
 	let port = 1234;
 
-	let setup = Setup::new_square(3., vec![
-		CameraInfo::new(62.2f64.to_radians()); 2
-	]);
+	let setup = Setup::new_empty();
 
 	let cam = setup.cameras[id as usize];
 
@@ -27,7 +25,7 @@ fn main() {
 		f64::to_be_bytes(cam.position.x).to_vec(),
 		f64::to_be_bytes(cam.position.y).to_vec(),
 		f64::to_be_bytes(cam.position.rotation).to_vec(),
-		f64::to_be_bytes(cam.info.fov).to_vec(),
+		f64::to_be_bytes(cam.fov).to_vec(),
 
 		i64::to_be_bytes(ms).to_vec(),
 	].into_iter().flatten().collect();

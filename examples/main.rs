@@ -27,7 +27,7 @@ async fn send_camera(address: String, camera: PlacedCamera) -> tokio::io::Result
     se.write_f64(camera.position.y).await?;
     se.write_f64(camera.position.rotation).await?;
 
-    se.write_f64(camera.info.fov).await?;
+    se.write_f64(camera.fov).await?;
 
     Ok(())
 }

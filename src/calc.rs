@@ -1,29 +1,16 @@
 use camloc_common::position::Position;
 use std::collections::HashMap;
 
-/// Physical characteristics of a camera
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub struct CameraInfo {
-    /// Horizontal FOV (**in radians**)
-    pub fov: f64,
-}
-
-impl CameraInfo {
-    /// FOV is **in radians**
-    pub fn new(fov: f64) -> Self {
-        Self { fov }
-    }
-}
-
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub struct PlacedCamera {
-    pub info: CameraInfo,
+    /// Horizontal FOV (**in radians**)
+    pub fov: f64,
     pub position: Position,
 }
 
 impl PlacedCamera {
-    pub fn new(info: CameraInfo, position: Position) -> Self {
-        Self { info, position, }
+    pub fn new(position: Position, fov: f64) -> Self {
+        Self { position, fov }
     }
 }
 
@@ -32,12 +19,16 @@ pub struct Setup {
 }
 
 impl Setup {
+    pub fn new_empty() -> Self {
+        Self { cameras: vec![] }
+    }
+
 	pub fn new_freehand(cameras: Vec<PlacedCamera>) -> Self {
 		Self { cameras }
 	}
 
-    pub fn new_square(square_size: f64, cameras: Vec<CameraInfo>) -> Self {
-        let c = cameras.len();
+    pub fn new_square(square_size: f64, fovs: Vec<f64>) -> Self {
+        let c = fovs.len();
         debug_assert!(
             (2..=4).contains(&c),
             "A square setup may only have 2 or 4 cameras"
@@ -46,26 +37,25 @@ impl Setup {
         let mut hmap: HashMap<u64, f64> = HashMap::new();
         
         let mut ind = 0;
-        let cameras = cameras
+        let cameras = fovs
             .into_iter()
-            .map(|c| {
-                let bits = c.fov.to_bits();
+            .map(|fov| {
+                let bits = fov.to_bits();
                 let d = match hmap.get(&bits) {
                     Some(v) => *v,
                     None => {
-                        let v = camloc_common::position::get_camera_distance_in_square(square_size, c.fov);
-                        hmap.insert(c.fov.to_bits(), v);
+                        let v = camloc_common::position::get_camera_distance_in_square(square_size, fov);
+                        hmap.insert(fov.to_bits(), v);
                         v
                     }
                 };
 
-                let info = c;
                 let pos = camloc_common::position::calc_posotion_in_square_distance(ind, d);
                 ind += 1;
 
                 PlacedCamera::new(
-                    info,
                     pos,
+                    fov,
                 )
             }
         ).collect();
@@ -83,7 +73,7 @@ impl Setup {
         for i in 0..c {
             if let Some(x) = pxs[i] {
                 tangents[i] = Some(
-                    (self.cameras[i].position.rotation + (self.cameras[i].info.fov * (0.5 - x))).tan()
+                    (self.cameras[i].position.rotation + (self.cameras[i].fov * (0.5 - x))).tan()
                 );
                 lines += 1;
             }
