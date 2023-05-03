@@ -1,7 +1,10 @@
-use camloc_common::hosts::{HostStatus, ServerStatus};
 use crate::Host;
+use camloc_common::hosts::{HostStatus, ServerStatus};
 
-pub(crate) fn print_hosts<F: FnMut(&HostStatus) -> bool>(hosts: &mut [Host], mut filter: F) -> Vec<usize> {
+pub(crate) fn print_hosts<F: FnMut(&HostStatus) -> bool>(
+    hosts: &mut [Host],
+    mut filter: F,
+) -> Vec<usize> {
     println!("Available hosts");
     let mut ret = vec![];
 
@@ -19,14 +22,13 @@ pub(crate) fn print_hosts<F: FnMut(&HostStatus) -> bool>(hosts: &mut [Host], mut
 
         match &h.status {
             HostStatus::Client { calibrated, .. } => {
-                print!("CLIENT {ip}{}", if *calibrated {
-                    " CALIBRATED"
-                } else {
-                    ""
-                });
-            },
+                print!("CLIENT {ip}");
+                if *calibrated {
+                    print!(" CALIBRATED");
+                }
+            }
             HostStatus::ConfiglessClient(_) => println!("PHONE  {ip}"),
-            HostStatus::Server(_)           => println!("SERVER {ip}"),
+            HostStatus::Server(_) => println!("SERVER {ip}"),
         }
 
         if fres {
@@ -39,7 +41,7 @@ pub(crate) fn print_hosts<F: FnMut(&HostStatus) -> bool>(hosts: &mut [Host], mut
     ret
 }
 
-pub(crate) fn get_server(hosts: &mut[Host]) -> Result<&mut Host, usize> {
+pub(crate) fn get_server(hosts: &mut [Host]) -> Result<&mut Host, usize> {
     let mut si = Err(0);
 
     for (i, h) in hosts.iter().enumerate() {
