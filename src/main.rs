@@ -2,7 +2,7 @@ mod aruco;
 mod track;
 mod util;
 
-use camloc_common::hosts::{Command, constants::{MAIN_PORT, MAX_MESSAGE_LENGTH}, HostStatus, ClientStatus};
+use camloc_common::{hosts::{Command, constants::{MAIN_PORT, MAX_MESSAGE_LENGTH}, HostStatus, ClientStatus}, calibration::FullCameraInfo};
 use std::{net::{SocketAddr, UdpSocket}, time::Duration, mem::size_of};
 use opencv::{core, highgui, prelude::*, videoio};
 use track::Tracking;
@@ -13,38 +13,53 @@ use crate::aruco::detect;
 const BUF_SIZE: usize = 6 * 8;
 
 struct Config {
+    calibration: Option<FullCameraInfo>,
     server: SocketAddr,
     rotation: f64,
-    fov: f64,
     x: f64,
     y: f64,
 }
 
 impl Config {
-    fn to_connection_request(&self) -> [u8; 33] {
-        [
-            Into::<u8>::into(Command::Connect).to_be_bytes().as_slice(),
-            self.x.to_be_bytes().as_slice(),
-            self.y.to_be_bytes().as_slice(),
-            self.rotation.to_be_bytes().as_slice(),
-            self.fov.to_be_bytes().as_slice(),
-        ].concat()
-            .try_into()
-            .unwrap()
+    fn to_connection_request(&self) -> Option<[u8; 33]> {
+        let cmd = Into::<u8>::into(Command::Connect).to_be_bytes();
+        let x = self.x.to_be_bytes();
+        let y = self.y.to_be_bytes();
+        let r = self.rotation.to_be_bytes();
+        let f = if let Some(c) = &self.calibration {
+            c.horizontal_fov.to_be_bytes()
+        } else {
+            return None;
+        };
+
+        vec![
+            cmd.as_slice(),
+            x.as_slice(),
+            y.as_slice(),
+            r.as_slice(),
+            f.as_slice()
+        ].concat().try_into().ok()
     }
 
-    fn from_buffer(buf: &[u8], calibrated: bool) -> Result<Self, Box<dyn std::error::Error>> {
-        if calibrated {
-            todo!()
-        }
+    fn from_organizer(buf: &[u8], calibrated: bool) -> Result<Self, Box<dyn std::error::Error>> {
+        let x = f64::from_be_bytes(buf[0..8].try_into()?);
+        let y = f64::from_be_bytes(buf[8..16].try_into()?);
+        let rotation = f64::from_be_bytes(buf[16..24].try_into()?);
+        
+        let ip_len = u16::from_be_bytes(buf[24..26].try_into()?) as usize;
+        let ip = String::from_utf8(buf[26..26 + ip_len].to_vec())?;
+        
+        let server = SocketAddr::new(ip.parse()?, MAIN_PORT);
 
-        let ip = String::from_utf8(buf[32..].to_vec())?;
         Ok(Self {
-            x: f64::from_be_bytes(buf[0..8].try_into()?),
-            y: f64::from_be_bytes(buf[8..16].try_into()?),
-            rotation: f64::from_be_bytes(buf[16..24].try_into()?),
-            fov: f64::from_be_bytes(buf[24..32].try_into()?),
-            server: SocketAddr::new(ip.parse()?, MAIN_PORT),
+            calibration: if calibrated {
+                Some(FullCameraInfo::from_be_bytes(&buf[26 + ip_len..]))
+            } else {
+                None
+            },
+            rotation,
+            server,
+            x, y,
         })
     }
 }
@@ -139,10 +154,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // recieve camera info and server ip
         socket.recv(&mut buf)?;
-        let config = Config::from_buffer(&buf, false)?;
+        let config = Config::from_organizer(&buf, false)?;
 
         // connect to server
-        socket.send_to(&config.to_connection_request(), config.server)?;
+        socket.send_to(&config.to_connection_request().unwrap(), config.server)?;
         socket.set_read_timeout(Some(Duration::from_millis(1)))?;
 
         highgui::named_window("videocap", highgui::WINDOW_AUTOSIZE)?;
