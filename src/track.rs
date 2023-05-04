@@ -14,7 +14,7 @@ pub struct Tracking {
 }
 
 impl Tracking {
-    pub fn new() -> opencv::Result<Self> {
+    pub fn new() -> Result<Self, &'static str> {
         Ok(Self {
             tracker: Tracking::reinit(&Mat::default(), Rect::default())?,
             rect: Rect::default(),
@@ -22,31 +22,42 @@ impl Tracking {
     }
 
     /// creates a new `TrackerKCF` struct (because calling `init` on the same instance causes segfaults for whatever reason)
-    fn reinit(frame: &Mat, rect: Rect) -> opencv::Result<Ptr<dyn tracking::TrackerKCF>> {
-        let mut tracker =
-            <dyn tracking::TrackerKCF>::create(tracking::TrackerKCF_Params::default()?)?;
+    fn reinit(frame: &Mat, rect: Rect) -> Result<Ptr<dyn tracking::TrackerKCF>, &'static str> {
+        let mut tracker = <dyn tracking::TrackerKCF>::create(
+            tracking::TrackerKCF_Params::default()
+                .map_err(|_| "Couldn't get default tracker params")?,
+        )
+        .map_err(|_| "Couldn't create tracker")?;
         if !rect.empty() {
-            tracker.init(frame, rect)?;
+            tracker
+                .init(frame, rect)
+                .map_err(|_| "Couldn't init tracker")?
         }
         Ok(tracker)
     }
 
-    pub fn init(&mut self, frame: &Mat) -> opencv::Result<()> {
-        self.tracker = Tracking::reinit(frame, self.rect)?;
+    pub fn init(&mut self, frame: &Mat) -> Result<(), &'static str> {
+        self.tracker = Tracking::reinit(frame, self.rect).map_err(|_| "Couldn't init tracker")?;
         Ok(())
     }
 
     /// returns None if lost object
-    pub fn track(&mut self, frame: &Mat, draw: Option<&mut Mat>) -> opencv::Result<Option<f64>> {
+    pub fn track(
+        &mut self,
+        frame: &Mat,
+        draw: Option<&mut Mat>,
+    ) -> Result<Option<f64>, &'static str> {
         match self.tracker.update(&frame, &mut self.rect) {
             Ok(true) => {
                 if let Some(draw) = draw {
-                    util::rect(draw, self.rect, Color::Cyan)?;
-                    util::draw_x(draw, self.rect.center(), Color::Red)?;
+                    util::rect(draw, self.rect, Color::Cyan).map_err(|_| "Couldn't draw rect")?;
+                    util::draw_x(draw, self.rect.center(), Color::Red)
+                        .map_err(|_| "Couldn't draw center")?;
                 }
                 Ok(Some(util::relative_x(frame, self.rect.center())))
             }
-            _ => Ok(None),
+            Ok(false) => Ok(None),
+            Err(_) => Err("Couldn't update tracker"),
         }
     }
 }
