@@ -117,8 +117,13 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
         let get_from_stdin: usize = get_from_stdin("Enter command: start (0) / stop (1) client: ")?;
         println!();
         match get_from_stdin {
-            0 => self.start_client()?,
-            1 => self.stop_client()?,
+            0 => if let Err(e) = self.start_client() {
+                println!("Couldn't start client because: {e}");
+            },
+
+            1 => if let Err(e) = self.stop_client() {
+                println!("Couldn't stop client because: {e}");
+            },
             _ => (),
         }
         println!();
