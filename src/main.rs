@@ -57,13 +57,13 @@ impl SetupType {
         println!("Enter camera position");
         Ok(match self {
             SetupType::Square { side_length } => calc_posotion_in_square_distance(
-                get_from_stdin("  Camera index")?,
+                get_from_stdin("  Camera index: ")?,
                 get_camera_distance_in_square(*side_length, fov),
             ),
             SetupType::Free => Position::new(
                 get_from_stdin("  x: ")?,
                 get_from_stdin("  y: ")?,
-                get_from_stdin("  rotation: ")?,
+                get_from_stdin::<f64>("  rotation (degrees): ")?.to_radians(),
             ),
         })
     }
@@ -117,13 +117,17 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
         let get_from_stdin: usize = get_from_stdin("Enter command: start (0) / stop (1) client: ")?;
         println!();
         match get_from_stdin {
-            0 => if let Err(e) = self.start_client() {
-                println!("Couldn't start client because: {e}");
-            },
+            0 => {
+                if let Err(e) = self.start_client() {
+                    println!("Couldn't start client because: {e}");
+                }
+            }
 
-            1 => if let Err(e) = self.stop_client() {
-                println!("Couldn't stop client because: {e}");
-            },
+            1 => {
+                if let Err(e) = self.stop_client() {
+                    println!("Couldn't stop client because: {e}");
+                }
+            }
             _ => (),
         }
         println!();
