@@ -3,7 +3,8 @@ use std::mem::size_of;
 use opencv::{
     aruco::calibrate_camera_charuco,
     calib3d::get_optimal_new_camera_matrix,
-    core, highgui,
+    core::{self, FileStorage},
+    highgui,
     objdetect::{self, CharucoBoard, CharucoDetector, CharucoParameters},
     prelude::*,
     types,
@@ -203,6 +204,52 @@ pub struct CameraParams {
     pub dist_coeffs: Mat,
 }
 
+impl Clone for CameraParams {
+    fn clone(&self) -> Self {
+        Self {
+            optimal_matrix: self.optimal_matrix.clone(),
+            camera_matrix: self.camera_matrix.clone(),
+            dist_coeffs: self.dist_coeffs.clone(),
+        }
+    }
+}
+
+impl CameraParams {
+    pub fn save(&self, filename: &str) -> opencv::Result<()> {
+        let mut fs = FileStorage::new(filename, core::FileStorage_WRITE, "")?;
+
+        fs.write_mat("camera_matrix", &self.camera_matrix)?;
+        fs.write_mat("dist_coeffs", &self.dist_coeffs)?;
+        fs.write_mat("optimal_matrix", &self.optimal_matrix)?;
+
+        fs.release()?;
+        Ok(())
+    }
+
+    pub fn load(filename: &str) -> opencv::Result<Self> {
+        let mut fs = FileStorage::new(filename, core::FileStorage_READ, "")?;
+
+        let mut camera_matrix = Mat::default();
+        let mut dist_coeffs = Mat::default();
+        let mut optimal_matrix = Mat::default();
+
+        fs.get("camera_matrix")?
+            .mat()?
+            .copy_to(&mut camera_matrix)?;
+        fs.get("dist_coeffs")?.mat()?.copy_to(&mut dist_coeffs)?;
+        fs.get("optimal_matrix")?
+            .mat()?
+            .copy_to(&mut optimal_matrix)?;
+
+        fs.release()?;
+        Ok(CameraParams {
+            optimal_matrix,
+            camera_matrix,
+            dist_coeffs,
+        })
+    }
+}
+
 impl FullCameraInfo {
     pub fn to_be_bytes(&self) -> Vec<u8> {
         let om = self
@@ -270,6 +317,15 @@ impl FullCameraInfo {
 pub struct FullCameraInfo {
     pub params: CameraParams,
     pub horizontal_fov: f64,
+}
+
+impl Clone for FullCameraInfo {
+    fn clone(&self) -> Self {
+        Self {
+            params: self.params.clone(),
+            horizontal_fov: self.horizontal_fov,
+        }
+    }
 }
 
 pub struct FoundBoard {
