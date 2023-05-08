@@ -16,6 +16,7 @@ use opencv::{
     videoio::{self, VideoCapture},
 };
 use std::{
+    fs::File,
     io::{Read, Write},
     net::{IpAddr, SocketAddr, TcpStream, UdpSocket},
     time::Duration,
@@ -27,7 +28,7 @@ use crate::aruco::detect;
 const BUF_SIZE: usize = 2048;
 
 struct Config {
-    calibration: Option<FullCameraInfo>,
+    calibration: FullCameraInfo,
     server: SocketAddr,
     rotation: f64,
     x: f64,
@@ -40,11 +41,7 @@ impl Config {
         let x = self.x.to_be_bytes();
         let y = self.y.to_be_bytes();
         let r = self.rotation.to_be_bytes();
-        let f = if let Some(c) = &self.calibration {
-            c.horizontal_fov.to_be_bytes()
-        } else {
-            return None;
-        };
+        let f = self.calibration.horizontal_fov.to_be_bytes();
 
         [
             cmd.as_slice(),
@@ -58,7 +55,10 @@ impl Config {
         .ok()
     }
 
-    fn from_organizer(r: &mut impl Read, calibrated: bool) -> Result<Self, &'static str> {
+    fn from_organizer(
+        r: &mut impl Read,
+        cached_calibration: &Option<FullCameraInfo>,
+    ) -> Result<Self, &'static str> {
         let mut buf = vec![0; 26];
         r.read_exact(&mut buf)
             .map_err(|_| "Couldn't read config x, y, rotation, ip_len")?;
@@ -76,26 +76,45 @@ impl Config {
 
         let server = SocketAddr::new(ip.parse().map_err(|_| "Couldn't parse ip")?, MAIN_PORT);
 
-        let calibration = if calibrated {
-            Some(FullCameraInfo::from_be_bytes(r).map_err(|_| "Couldn't get camera info")?)
+        let calibration = if let Some(c) = cached_calibration {
+            c.clone()
         } else {
-            None
+            FullCameraInfo::from_be_bytes(r).map_err(|_| "Couldn't get camera info")?
         };
 
         Ok(Self {
-            calibration,
-            rotation,
-            server,
             x,
             y,
+            rotation,
+            calibration,
+            server,
         })
     }
 }
 
 fn main() -> Result<(), &'static str> {
-    // TODO: clap args
-    let camera_index = 0;
-    let calibration_file = ".calib";
+    let args = {
+        use clap::Parser;
+
+        /// The camloc client
+        #[derive(Parser)]
+        struct Args {
+            #[arg(short, long, default_value_t = 0u16)]
+            camera_index: u16,
+
+            /// Cache file
+            #[arg(long, default_value = ".calib")]
+            calibration_cache: String,
+        }
+
+        Args::parse()
+    };
+
+    let cached_calibration = if let Ok(mut f) = File::open(&args.calibration_cache) {
+        FullCameraInfo::from_be_bytes(&mut f).ok()
+    } else {
+        None
+    };
 
     let mut frame = Mat::default();
     let mut aruco = Aruco::new(2)?;
@@ -119,7 +138,7 @@ fn main() -> Result<(), &'static str> {
                     .send_to(
                         &[HostStatus::Client {
                             status: ClientStatus::Idle,
-                            calibrated: true,
+                            calibrated: cached_calibration.is_some(),
                         }
                         .try_into()
                         .unwrap()],
@@ -141,7 +160,7 @@ fn main() -> Result<(), &'static str> {
             }
         }
 
-        let mut cam = VideoCapture::new(camera_index, videoio::CAP_ANY)
+        let mut cam = VideoCapture::new(args.camera_index as i32, videoio::CAP_ANY)
             .map_err(|_| "Couldn't create camera instance")?;
 
         if !cam
@@ -152,7 +171,13 @@ fn main() -> Result<(), &'static str> {
         }
 
         // recieve camera info and server ip
-        let config = match get_config(&mut buf, &organizer.ip(), &mut cam, &mut frame) {
+        let config = match get_config(
+            &mut buf,
+            &organizer.ip(),
+            &mut cam,
+            &mut frame,
+            &cached_calibration,
+        ) {
             Ok(c) => c,
             Err(e) => {
                 println!("Couldn't get config from organizer because: {e}");
@@ -260,6 +285,7 @@ fn get_config(
     organizer: &IpAddr,
     cam: &mut VideoCapture,
     mut frame: &mut Mat,
+    cached_calibration: &Option<FullCameraInfo>,
 ) -> Result<Config, &'static str> {
     let mut s = TcpStream::connect((*organizer, ORGANIZER_STARTER_PORT))
         .map_err(|_| "Couldn't connect to organizer tcp")?;
@@ -290,5 +316,5 @@ fn get_config(
     }
 
     // recieve camera info and server ip
-    Config::from_organizer(&mut s, false)
+    Config::from_organizer(&mut s, cached_calibration)
 }
