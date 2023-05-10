@@ -59,7 +59,7 @@ pub struct LocationServiceHandle {
 
 impl Drop for LocationServiceHandle {
     fn drop(&mut self) {
-        let handle = mem::replace(&mut self.handle, None).expect("Handle should always be Some");
+        let handle = self.handle.take().expect("Handle should always be Some");
 
         let r = self.service.running.write();
         let res = tokio::task::block_in_place(|| {

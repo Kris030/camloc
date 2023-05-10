@@ -72,11 +72,11 @@ async fn run() -> Result<(), String> {
         let (rx, tx) = oneshot::channel();
         CHAN = (Some(rx), Some(tx));
     }
-    let mut rx = std::mem::replace(unsafe { &mut CHAN.1 }, None).unwrap();
+    let mut rx = unsafe { &mut CHAN.1 }.take().unwrap();
 
     fn ctrlc_handler() {
         println!("ctrlc pressed");
-        let Some(tx) = std::mem::replace(unsafe { &mut CHAN.0 }, None) else {
+        let Some(tx) = unsafe { &mut CHAN.0 }.take() else {
             return;
         };
 
