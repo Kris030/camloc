@@ -126,7 +126,11 @@ pub fn draw_charuco_board(image: &mut Mat, board: &FoundBoard) -> opencv::Result
     Ok(())
 }
 
-pub fn calibrate(board: &CharucoBoard, images: &[Mat]) -> opencv::Result<FullCameraInfo> {
+pub fn calibrate(
+    board: &CharucoBoard,
+    images: &[Mat],
+    image_size: core::Size,
+) -> opencv::Result<FullCameraInfo> {
     let (mut charuco_corners, mut charuco_ids) = (
         types::VectorOfVectorOfPoint2f::new(),
         types::VectorOfVectorOfi32::new(),
@@ -138,10 +142,6 @@ pub fn calibrate(board: &CharucoBoard, images: &[Mat]) -> opencv::Result<FullCam
         }
     }
 
-    let image_size = core::Size {
-        width: 640,
-        height: 480,
-    };
     let mut camera_matrix = Mat::default();
     let mut dist_coeffs = Mat::default();
     let mut rvecs = types::VectorOfMat::new();
@@ -174,25 +174,12 @@ pub fn calibrate(board: &CharucoBoard, images: &[Mat]) -> opencv::Result<FullCam
         false,
     )?;
 
-    let k = camera_matrix
-        .to_vec_2d::<f64>()?
-        .into_iter()
-        .flatten()
-        .collect::<Vec<f64>>();
-    let k: [f64; 9] = k.as_slice().try_into().unwrap();
-    let k = core::Matx::from_array(k);
-    let cam = opencv::viz::Camera::new_2(k, image_size)?;
-
-    let [horizontal_fov, _] = cam.get_fov()?.0;
-
-    Ok(FullCameraInfo {
-        params: CameraParams {
-            camera_matrix,
-            dist_coeffs,
-            optimal_matrix,
-        },
-        horizontal_fov,
-    })
+    CameraParams {
+        camera_matrix,
+        dist_coeffs,
+        optimal_matrix,
+    }
+    .to_full(image_size)
 }
 
 pub struct CameraParams {
@@ -202,6 +189,29 @@ pub struct CameraParams {
     pub camera_matrix: Mat,
     /// f64 | 4, 5, 8 or 12
     pub dist_coeffs: Mat,
+}
+
+impl CameraParams {
+    pub fn to_full(&self, image_size: core::Size) -> opencv::Result<FullCameraInfo> {
+        #[allow(clippy::map_clone)]
+        let k: Vec<f64> = self
+            .camera_matrix
+            .to_vec_2d::<f64>()?
+            .iter()
+            .flatten()
+            .map(|x| *x)
+            .collect();
+        let k: [f64; 9] = k.as_slice().try_into().unwrap();
+        let k = core::Matx::from_array(k);
+        let cam = opencv::viz::Camera::new_2(k, image_size)?;
+
+        let [horizontal_fov, _] = cam.get_fov()?.0;
+
+        Ok(FullCameraInfo {
+            params: self.clone(),
+            horizontal_fov,
+        })
+    }
 }
 
 impl Clone for CameraParams {

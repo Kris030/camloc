@@ -137,21 +137,25 @@ pub enum Command {
     Connect = Command::CONNECT as isize,
 
     Start = Command::START as isize,
+    StartConfigless = Command::START_CONFIGLESS as isize,
     Stop = Command::STOP as isize,
 
     RequestImage = Command::REQUEST_IMAGE as isize,
     ImagesDone = Command::IMAGES_DONE as isize,
 
     ValueUpdate = Command::VALUE_UPDATE as isize,
+    InfoUpdate = Command::INFO_UPDATE as isize,
 }
 impl Command {
     const PING: u8 = 0x0b;
     const CONNECT: u8 = 0xcc;
     const START: u8 = 0x60;
+    const START_CONFIGLESS: u8 = 0x6c;
     const STOP: u8 = 0xcd;
     const REQUEST_IMAGE: u8 = 0x17;
     const IMAGES_DONE: u8 = 0x1d;
     const VALUE_UPDATE: u8 = 0x21;
+    const INFO_UPDATE: u8 = 0x1f;
 }
 
 impl From<Command> for u8 {
@@ -169,10 +173,16 @@ impl TryInto<Command> for u8 {
         match self {
             x if x == Ping as u8 => Ok(Ping),
             x if x == Connect as u8 => Ok(Connect),
+
             x if x == Start as u8 => Ok(Start),
+            x if x == StartConfigless as u8 => Ok(StartConfigless),
             x if x == Stop as u8 => Ok(Stop),
+
             x if x == RequestImage as u8 => Ok(RequestImage),
+            x if x == ImagesDone as u8 => Ok(ImagesDone),
+
             x if x == ValueUpdate as u8 => Ok(ValueUpdate),
+            x if x == InfoUpdate as u8 => Ok(InfoUpdate),
 
             _ => Err(()),
         }

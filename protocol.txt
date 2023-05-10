@@ -21,6 +21,7 @@ loop
 			if all values updated
 				calculate new position
 				notify subscribers
+		if info update [RECV UDP:M Command::UpdateInfo, x: f64, y: f64, rotation: f64, fov: f64]
 kill all clients [SEND UDP:M->M Command::Kill]
 
 CLIENT
@@ -29,6 +30,7 @@ outer loop
 	wait for ping [RECV UDP:M Command::Ping]
 	reply with status [SEND UDP:M->? HostStatus(ClientStatus::Idle)]
 	wait for organizer start [RECV TCP:S Command::Start]
+	connect to organizer TCP:S
 	loop
 		receive message
 		if image request [RECV TCP:S Command::RequestImage]
@@ -57,6 +59,26 @@ outer loop
 		find x value
 		send value to server [SEND UDP:M->M Command::UpdateValue, value: f64]
 
+CONFIGLESS CLIENT
+
+outer loop
+	wait for ping [RECV UDP:M Command::Ping]
+	reply with status [SEND UDP:M->? HostStatus(ConfiglessClientStatus::Idle)]
+	wait for organizer start + info [
+		RECV TCP:S Command::StartConfigless,
+		ip_len: u16, ip: [u8],
+	]
+	connect [SEND UDP:M->M Command::Connect, x: f64, y: f64, rotation: f64, fov: f64]
+	inner loop
+		receive message
+			if stop [RECV UDP:M Command::Stop]
+				break (inner)
+			if ping [RECV UDP:M Command::Ping]
+				reply with status [SEND HostStatus(ClientStatus::Running)]
+		find x value
+		send value to server [SEND UDP:M->M Command::UpdateValue, value: f64]
+		if info changed
+			send info update [SEND UDP:M->M Command::UpdateInfo, x: f64, y: f64, rotation: f64, fov: f64]
 
 ORGANIZER
 
@@ -71,7 +93,8 @@ loop
 			update client status
  get user action
 	if client start
-		send start [SEND TCP:*->S Command::Start]
+		send start [SEND UDP:*->M Command::Start]
+		accept client connection TCP:S
 		loop
 			send image request [SEND TCP:*->S Command::RequestImage]
 			recieve jpg image [RECV TCP:* len: u64, bytes: [u8]]
@@ -80,7 +103,7 @@ loop
 					send stream stop [SEND TCP:*->S Command::ImagesDone]
 		prompt user for position
 		if calibrated
-			send info [SEND TCP:*->S x: f64, y: f64, rotation: f64, fov: f64, ip_len: u16, ip: [u8]]
+			send info [SEND TCP:*->S x: f64, y: f64, rotation: f64, ip_len: u16, ip: [u8]]
 		else
 			calibrate
 			send info [SEND TCP:*->S
@@ -89,7 +112,8 @@ loop
 				optimal_matrix: [f64; 9],
 				camera_matrix: [f64; 9],
 				distance_coefficients_len: u8,
-				distance_coefficients: [f64]
+				distance_coefficients: [f64],
+				fov: f64,
 			]
 	if client stop
 		send stop [SEND UDP:*->M Command::Stop]
