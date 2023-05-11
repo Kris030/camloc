@@ -96,7 +96,7 @@ impl TryFrom<u8> for HostStatus {
             },
 
             CLIENT => {
-                let calibrated = v & masks::CALIBRATED != 0;
+                let calibrated = (v & masks::CALIBRATED) != 0;
                 match v & masks::STATE {
                     RUNNING => Ok(Client {
                         calibrated,
