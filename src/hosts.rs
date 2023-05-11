@@ -27,7 +27,7 @@ pub mod constants {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum HostStatus {
     ConfiglessClient(ClientStatus),
     Server(ServerStatus),
@@ -117,14 +117,14 @@ impl TryFrom<u8> for HostStatus {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum ClientStatus {
     Unreachable,
     Running,
     Idle,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum ServerStatus {
     Unreachable,
     Running,
