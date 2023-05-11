@@ -290,28 +290,45 @@ impl FullCameraInfo {
             .map(|a| a.1)
             .flat_map(f64::to_be_bytes);
 
-        om.chain(cm).chain(dclen).chain(dc).collect()
+        dclen.chain(om).chain(cm).chain(dc).collect()
     }
 
     pub fn from_be_bytes(r: &mut impl std::io::Read) -> Result<Self, std::io::Error> {
-        const MAT3X3_SIZE: usize = 3 * 3 * size_of::<f64>();
+        use std::io::{Error, ErrorKind};
         let mut buf = [0; 12 * 8];
 
-        r.read_exact(&mut buf[..MAT3X3_SIZE])?;
-        let optimal_matrix = Mat::from_slice_rows_cols(&buf[..MAT3X3_SIZE], 3, 3).unwrap();
-
-        r.read_exact(&mut buf[..MAT3X3_SIZE])?;
-        let camera_matrix = Mat::from_slice_rows_cols(&buf[..MAT3X3_SIZE], 3, 3).unwrap();
-
         r.read_exact(&mut buf[..1])?;
-        let cl = buf[0] as usize;
+        let coeff_count = buf[0] as usize;
 
-        r.read_exact(&mut buf[..cl])?;
-        let dist_coeffs = Mat::from_slice(&buf[..cl]).unwrap();
+        let mut get_mat = |w, h| -> Result<Mat, std::io::Error> {
+            let mat_size = w * h * size_of::<f64>();
+
+            r.read_exact(&mut buf[..mat_size])?;
+
+            let m: Result<Vec<f64>, std::array::TryFromSliceError> = buf[..mat_size]
+                .windows(size_of::<f64>())
+                .map(|w| w.try_into().map(f64::from_be_bytes))
+                .collect();
+
+            Mat::from_slice_rows_cols::<f64>(
+                &m.map_err(|_| Error::from(ErrorKind::InvalidData))?,
+                h,
+                w,
+            )
+            .map_err(|_| Error::from(ErrorKind::InvalidData))
+        };
+
+        let optimal_matrix = get_mat(3, 3)?;
+        let camera_matrix = get_mat(3, 3)?;
+        let dist_coeffs = get_mat(1, coeff_count)?;
 
         r.read_exact(&mut buf[..size_of::<f64>()])?;
-        let horizontal_fov =
-            f64::from_be_bytes(buf[..size_of::<f64>()].to_vec().try_into().unwrap());
+        let horizontal_fov = f64::from_be_bytes(
+            buf[..size_of::<f64>()]
+                .to_vec()
+                .try_into()
+                .map_err(|_| Error::from(ErrorKind::InvalidData))?,
+        );
 
         Ok(Self {
             horizontal_fov,
