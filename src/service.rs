@@ -147,7 +147,7 @@ impl LocationService {
                 }
 
                 // update value
-                8 if buf[0] == Command::ValueUpdate.into() => {
+                9 if buf[0] == Command::ValueUpdate.into() => {
                     let mut clients = self.clients.lock().await;
                     let mut ci = None;
                     let (mut mins, mut mini) = (0, 0);
@@ -202,7 +202,7 @@ impl LocationService {
                 }
 
                 // TODO: update value
-                8 if buf[0] == Command::InfoUpdate.into() => todo!(),
+                9 if buf[0] == Command::InfoUpdate.into() => todo!(),
 
                 _ => return Err("Recieved invalid number of bytes".to_string()),
             }
