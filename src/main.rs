@@ -246,8 +246,15 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
         let ip_bytes = server_ip.as_bytes();
         let ip_len = ip_bytes.len() as u16;
 
-        let (pos, calib) = if let Some((board, imgs)) = &uncalibrated {
-            let calib = calibration::calibrate(board, imgs).map_err(|_| "Couldn't calibrate")?;
+        // TODO: not very noice...
+        let (pos, calib) = if let Some((board, images)) = &uncalibrated {
+            let calib = calibration::calibrate(
+                board,
+                images,
+                images[0].size().map_err(|_| "Couldn't get image size??")?,
+            )
+            .map_err(|_| "Couldn't calibrate")?;
+
             let pos = self
                 .setup_type
                 .select_camera_position(calib.horizontal_fov)?;
@@ -359,7 +366,7 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
                 continue 'loopy;
             };
 
-            let h: _ = self
+            let h = self
                 .hosts
                 .iter_mut()
                 .zip(hit_hosts.iter_mut())
