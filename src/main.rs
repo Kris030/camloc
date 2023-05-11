@@ -111,6 +111,7 @@ fn main() -> Result<(), &'static str> {
     };
 
     let cached_calibration = if let Ok(mut f) = File::open(&args.calibration_cache) {
+        println!("Found calibration file");
         FullCameraInfo::from_be_bytes(&mut f).ok()
     } else {
         None
@@ -125,7 +126,7 @@ fn main() -> Result<(), &'static str> {
     let mut buf = [0; BUF_SIZE];
 
     'outer_loop: loop {
-        println!("waiting for connections...");
+        println!("Waiting for organizer...");
 
         // wait for organizer ping
         let organizer = loop {
@@ -162,13 +163,6 @@ fn main() -> Result<(), &'static str> {
 
         let mut cam = VideoCapture::new(args.camera_index as i32, videoio::CAP_ANY)
             .map_err(|_| "Couldn't create camera instance")?;
-
-        if !cam
-            .is_opened()
-            .map_err(|_| "Couldn't check if camera was opened?!?!?!")?
-        {
-            return Err("Camera index not found!");
-        }
 
         // recieve camera info and server ip
         let config = match get_config(
@@ -313,6 +307,11 @@ fn get_config(
             .map_err(|_| "Couldn't send image len")?;
         s.write_all(image_buffer.as_slice())
             .map_err(|_| "Couldn't send image")?;
+    }
+
+    if let Some(c) = cached_calibration {
+        s.write_all(c.horizontal_fov.to_be_bytes().as_slice())
+            .map_err(|_| "Couldn't send fov")?;
     }
 
     // recieve camera info and server ip
