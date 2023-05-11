@@ -306,7 +306,7 @@ impl FullCameraInfo {
             r.read_exact(&mut buf[..mat_size])?;
 
             let m: Result<Vec<f64>, std::array::TryFromSliceError> = buf[..mat_size]
-                .windows(size_of::<f64>())
+                .chunks(size_of::<f64>())
                 .map(|w| w.try_into().map(f64::from_be_bytes))
                 .collect();
 
