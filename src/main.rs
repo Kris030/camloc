@@ -1,12 +1,9 @@
-use camloc_common::calibration::{draw_charuco_board, find_board, generate_board, CameraParams};
+use camloc_common::calibration::{
+    calibrate, draw_charuco_board, find_board, generate_board, CameraParams,
+};
 use clap::{Parser, Subcommand};
 use opencv::{
-    core::{self, TermCriteria},
-    highgui, imgcodecs,
-    objdetect::{self, CharucoBoard, CharucoDetector, CharucoParameters},
-    prelude::*,
-    types,
-    videoio::VideoCapture,
+    core, highgui, imgcodecs, objdetect::CharucoBoard, prelude::*, videoio::VideoCapture,
 };
 
 #[derive(Parser)]
@@ -147,12 +144,13 @@ fn main() -> opencv::Result<()> {
                 return Ok(());
             }
 
-            calibrate(
+            let fci = calibrate(
                 &board,
-                &savefile,
                 &images,
                 core::Size::new(image_width as i32, image_height as i32),
-            )?
+            )?;
+
+            std::fs::write(savefile, fci.to_be_bytes()).unwrap();
         }
     };
 
@@ -166,9 +164,6 @@ pub fn take_samples(
 ) -> opencv::Result<Vec<Mat>> {
     highgui::named_window("videocap", highgui::WINDOW_AUTOSIZE)?;
     let mut cam = VideoCapture::new(camera_index, opencv::videoio::CAP_ANY)?;
-    if !cam.is_opened()? {
-        panic!("camera index not found!");
-    }
 
     let camera_params = if let Some(f) = filename {
         Some(CameraParams::load(&f)?)
@@ -213,125 +208,4 @@ pub fn take_samples(
     }
 
     Ok(ret)
-}
-
-pub fn detect_all_boards(
-    board: &CharucoBoard,
-    all_charuco_corners: &mut types::VectorOfVectorOfPoint2f,
-    all_charuco_ids: &mut types::VectorOfVectorOfi32,
-    images: &[Mat],
-) -> opencv::Result<()> {
-    let mut _rejected = types::VectorOfVectorOfPoint2f::new();
-    let marker_detector = objdetect::ArucoDetector::new(
-        &objdetect::get_predefined_dictionary(objdetect::PredefinedDictionaryType::DICT_4X4_50)?,
-        &objdetect::DetectorParameters::default()?,
-        objdetect::RefineParameters {
-            min_rep_distance: 0.5,
-            error_correction_rate: 1.0,
-            check_all_orders: true,
-        },
-    )?;
-
-    let charuco_detector = CharucoDetector::new(
-        board,
-        &CharucoParameters::default()?,
-        &objdetect::DetectorParameters::default()?,
-        objdetect::RefineParameters {
-            min_rep_distance: 0.5,
-            error_correction_rate: 1.0,
-            check_all_orders: true,
-        },
-    )?;
-
-    let mut marker_corners = types::VectorOfVectorOfPoint2f::new();
-    let mut marker_ids = types::VectorOfi32::new();
-    let mut charuco_corners = types::VectorOfPoint2f::new();
-    let mut charuco_ids = types::VectorOfi32::new();
-
-    for frame in images {
-        // detect
-        marker_detector.detect_markers(
-            &frame,
-            &mut marker_corners,
-            &mut marker_ids,
-            &mut _rejected,
-        )?;
-
-        // requires at least one detectable marker
-        if marker_ids.is_empty() {
-            continue;
-        }
-
-        // moved from interpolate_corners_charuco
-        charuco_detector.detect_board(
-            &frame,
-            &mut charuco_corners,
-            &mut charuco_ids,
-            &mut marker_corners,
-            &mut marker_ids,
-        )?;
-
-        if charuco_ids.is_empty() {
-            continue;
-        }
-
-        // push
-        all_charuco_corners.push(charuco_corners.clone());
-        all_charuco_ids.push(charuco_ids.clone());
-    }
-
-    Ok(())
-}
-
-pub fn calibrate(
-    board: &CharucoBoard,
-    filename: &str,
-    images: &[Mat],
-    image_size: core::Size,
-) -> opencv::Result<()> {
-    let mut charuco_corners = types::VectorOfVectorOfPoint2f::new();
-    let mut charuco_ids = types::VectorOfVectorOfi32::new();
-
-    detect_all_boards(board, &mut charuco_corners, &mut charuco_ids, images)?;
-
-    let mut camera_matrix = Mat::default();
-    let mut dist_coeffs = Mat::default();
-    let mut rvecs = types::VectorOfMat::new();
-    let mut tvecs = types::VectorOfMat::new();
-    let flags = 0;
-
-    let board = types::PtrOfCharucoBoard::new(board.clone());
-    let est = opencv::aruco::calibrate_camera_charuco(
-        &charuco_corners,
-        &charuco_ids,
-        &board,
-        image_size,
-        &mut camera_matrix,
-        &mut dist_coeffs,
-        &mut rvecs,
-        &mut tvecs,
-        flags,
-        TermCriteria::default()?,
-    )?;
-
-    println!("calibration finished\nestimated calibration error: {est:.3}");
-
-    let optimal_matrix = opencv::calib3d::get_optimal_new_camera_matrix(
-        &camera_matrix,
-        &dist_coeffs,
-        image_size,
-        0.2,
-        image_size,
-        None,
-        false,
-    )?;
-
-    CameraParams {
-        camera_matrix,
-        dist_coeffs,
-        optimal_matrix,
-    }
-    .save(filename)?;
-
-    Ok(())
 }
