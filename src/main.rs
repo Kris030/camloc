@@ -285,6 +285,15 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
                 .map_err(|_| "Couldn't write calibration")?;
         }
 
+        match &mut self.hosts[host_index].status {
+            HostStatus::ConfiglessClient(status) => *status = ClientStatus::Running,
+            HostStatus::Client { status, calibrated } => {
+                *status = ClientStatus::Running;
+                *calibrated = true;
+            }
+            HostStatus::Server(_) => unreachable!(),
+        };
+
         Ok(())
     }
 
