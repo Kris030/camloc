@@ -182,6 +182,7 @@ pub fn calibrate(
     .to_full(image_size)
 }
 
+#[derive(Debug)]
 pub struct CameraParams {
     /// f64 | 3x3
     pub optimal_matrix: Mat,
@@ -193,13 +194,12 @@ pub struct CameraParams {
 
 impl CameraParams {
     pub fn to_full(&self, image_size: core::Size) -> opencv::Result<FullCameraInfo> {
-        #[allow(clippy::map_clone)]
         let k: Vec<f64> = self
             .camera_matrix
             .to_vec_2d::<f64>()?
             .iter()
             .flatten()
-            .map(|x| *x)
+            .copied()
             .collect();
         let k: [f64; 9] = k.as_slice().try_into().unwrap();
         let k = core::Matx::from_array(k);
@@ -279,7 +279,7 @@ impl FullCameraInfo {
             .flatten()
             .flat_map(f64::to_be_bytes);
 
-        let dclen = (self.params.dist_coeffs.rows() as u8)
+        let dclen = (self.params.dist_coeffs.cols() as u8)
             .to_be_bytes()
             .into_iter();
         let dc = self
@@ -290,7 +290,9 @@ impl FullCameraInfo {
             .map(|a| a.1)
             .flat_map(f64::to_be_bytes);
 
-        dclen.chain(om).chain(cm).chain(dc).collect()
+        let fov = self.horizontal_fov.to_be_bytes().into_iter();
+
+        dclen.chain(om).chain(cm).chain(dc).chain(fov).collect()
     }
 
     pub fn from_be_bytes(r: &mut impl std::io::Read) -> Result<Self, std::io::Error> {
@@ -341,6 +343,7 @@ impl FullCameraInfo {
     }
 }
 
+#[derive(Debug)]
 pub struct FullCameraInfo {
     pub params: CameraParams,
     pub horizontal_fov: f64,
