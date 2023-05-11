@@ -26,6 +26,7 @@ pub(crate) fn print_hosts<F: FnMut(&HostStatus) -> bool>(
                 if *calibrated {
                     print!(" CALIBRATED");
                 }
+                println!();
             }
             HostStatus::ConfiglessClient(_) => println!("PHONE  {ip}"),
             HostStatus::Server(_) => println!("SERVER {ip}"),

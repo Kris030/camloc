@@ -114,7 +114,9 @@ struct Organizer<'a, 'b, const BUFFER_SIZE: usize> {
 
 impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
     fn handle_commands(&mut self) -> Result<(), String> {
-        let get_from_stdin: usize = get_from_stdin("Enter command: start (0) / stop (1) client: ")?;
+        let Ok(get_from_stdin) = get_from_stdin::<usize>("Enter command: start (0) / stop (1) client: ") else {
+            return Ok(())
+        };
         println!();
         match get_from_stdin {
             0 => {
