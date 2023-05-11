@@ -201,6 +201,9 @@ impl LocationService {
                     }
                 }
 
+                // TODO: update value
+                8 if buf[0] == Command::InfoUpdate.into() => todo!(),
+
                 _ => return Err("Recieved invalid number of bytes".to_string()),
             }
         }
