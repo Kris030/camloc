@@ -29,19 +29,20 @@ CLIENT
 outer loop
 	wait for ping [RECV UDP:M Command::Ping]
 	reply with status [SEND UDP:M->? HostStatus(ClientStatus::Idle)]
-	wait for organizer start [RECV TCP:S Command::Start]
-	connect to organizer TCP:S
+	wait for organizer start [RECV UDP:M Command::Start]
+	connect to organizer TCP:*->S
 	loop
 		receive message
-		if image request [RECV TCP:S Command::RequestImage]
+		if image request [RECV TCP:? Command::RequestImage]
    			send image from camera [SEND TCP:S->? len: u64, img: [u8]]
    			continue
-		if done [RECV TCP:S Command::ImagesDone]
+		if done [RECV TCP:? Command::ImagesDone]
 			break
 	if calibrated
-  		recieve camera info, server ip [RECV TCP:S x: f64, y: f64, rotation: f64, ip_len: u16, ip: [u8]]
+		send fov [SEND TCP:*->? fov: f64]
+  		recieve camera info, server ip [RECV TCP:* x: f64, y: f64, rotation: f64, ip_len: u16, ip: [u8]]
  	if not calibrated
-		recieve camera info, server ip, calibration [RECV TCP:S
+		recieve camera info, server ip, calibration [RECV TCP:*
 			x: f64, y: f64, rotation: f64,
 			ip_len: u16, ip: [u8],
 			optimal_matrix: [f64; 9],
@@ -65,7 +66,7 @@ outer loop
 	wait for ping [RECV UDP:M Command::Ping]
 	reply with status [SEND UDP:M->? HostStatus(ConfiglessClientStatus::Idle)]
 	wait for organizer start + info [
-		RECV TCP:S Command::StartConfigless,
+		RECV UDP:M Command::StartConfigless,
 		ip_len: u16, ip: [u8],
 	]
 	connect [SEND UDP:M->M Command::Connect, x: f64, y: f64, rotation: f64, fov: f64]
@@ -96,17 +97,18 @@ loop
 		send start [SEND UDP:*->M Command::Start]
 		accept client connection TCP:S
 		loop
-			send image request [SEND TCP:*->S Command::RequestImage]
-			recieve jpg image [RECV TCP:* len: u64, bytes: [u8]]
+			send image request [SEND TCP:S->? Command::RequestImage]
+			recieve jpg image [RECV TCP:S len: u64, bytes: [u8]]
 				show image to user
 				if user wants to quit
-					send stream stop [SEND TCP:*->S Command::ImagesDone]
+					send stream stop [SEND TCP:S->? Command::ImagesDone]
 		prompt user for position
 		if calibrated
-			send info [SEND TCP:*->S x: f64, y: f64, rotation: f64, ip_len: u16, ip: [u8]]
+			get fov [RECV TCP:S fov: f64]
+			send info [SEND TCP:S->? x: f64, y: f64, rotation: f64, ip_len: u16, ip: [u8]]
 		else
 			calibrate
-			send info [SEND TCP:*->S
+			send info [SEND TCP:S->?
 				x: f64, y: f64, rotation: f64,
 				ip_len: u16, ip: [u8],
 				optimal_matrix: [f64; 9],
@@ -117,4 +119,3 @@ loop
 			]
 	if client stop
 		send stop [SEND UDP:*->M Command::Stop]
-
