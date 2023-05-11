@@ -179,7 +179,7 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
 
         let uncalibrated = match self.hosts[host_index].status {
             HostStatus::Client { calibrated, .. } => !calibrated,
-            HostStatus::ConfiglessClient(_) => return Ok(()),
+            HostStatus::ConfiglessClient(_) => false,
             HostStatus::Server(_) => unreachable!(),
         };
 
@@ -246,7 +246,6 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
         let ip_bytes = server_ip.as_bytes();
         let ip_len = ip_bytes.len() as u16;
 
-        // TODO: not very noice...
         let (pos, calib) = if let Some((board, images)) = &uncalibrated {
             let calib = calibration::calibrate(
                 board,
@@ -261,7 +260,11 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
 
             (pos, Some(calib))
         } else {
-            (self.setup_type.select_camera_position(f64::NAN)?, None)
+            let fov = &mut self.buffer[..size_of::<f64>()];
+            s.read_exact(fov)
+                .map_err(|_| "Couldn't get fov from calibrated client")?;
+            let fov = f64::from_be_bytes(fov.try_into().unwrap());
+            (self.setup_type.select_camera_position(fov)?, None)
         };
 
         s.write_all(pos.x.to_be_bytes().as_slice())
