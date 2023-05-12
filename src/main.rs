@@ -99,12 +99,17 @@ fn main() -> Result<(), &'static str> {
         /// The camloc client
         #[derive(Parser)]
         struct Args {
+            /// The camera index to use
             #[arg(short, long, default_value_t = 0u16)]
             camera_index: u16,
 
-            /// Cache file
+            /// Calibration cache file
             #[arg(long, default_value = ".calib")]
             calibration_cache: String,
+
+            /// Show what's happening
+            #[arg(short, long, default_value_t = false)]
+            gui: bool,
         }
 
         Args::parse()
@@ -186,10 +191,12 @@ fn main() -> Result<(), &'static str> {
             config,
             &mut buf,
             &mut frame,
+            args.gui,
         )?;
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn inner_loop(
     socket: &UdpSocket,
     cam: &mut VideoCapture,
@@ -198,12 +205,15 @@ fn inner_loop(
     config: Config,
     buf: &mut [u8],
     mut frame: &mut Mat,
+    gui: bool,
 ) -> Result<(), &'static str> {
     let mut draw = Mat::default();
     let mut has_object = false;
 
-    highgui::named_window("videocap", highgui::WINDOW_AUTOSIZE)
-        .map_err(|_| "Couldn't open window")?;
+    if gui {
+        highgui::named_window("videocap", highgui::WINDOW_AUTOSIZE)
+            .map_err(|_| "Couldn't open window")?;
+    }
 
     loop {
         let read_timeout = socket
@@ -240,7 +250,7 @@ fn inner_loop(
             .set_read_timeout(read_timeout)
             .map_err(|_| "Couldn't set read timeout?!?!??!")?;
 
-        if highgui::wait_key(10).map_err(|_| "Error while waiting for key")? == 113 {
+        if gui && highgui::wait_key(10).map_err(|_| "Error while waiting for key")? == 113 {
             break;
         }
 
@@ -253,7 +263,9 @@ fn inner_loop(
 
         let x = detect(frame, Some(&mut draw), &mut has_object, aruco, tracker)?;
 
-        highgui::imshow("videocap", &draw).map_err(|_| "Couldn't show frame")?;
+        if gui {
+            highgui::imshow("videocap", &draw).map_err(|_| "Couldn't show frame")?;
+        }
 
         socket
             .send_to(
@@ -263,7 +275,9 @@ fn inner_loop(
             .map_err(|_| "Couldn't send value")?;
     }
 
-    highgui::destroy_all_windows().map_err(|_| "Couldn't close window")?;
+    if gui {
+        highgui::destroy_all_windows().map_err(|_| "Couldn't close window")?;
+    }
 
     Ok(())
 }
