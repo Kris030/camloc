@@ -10,12 +10,16 @@ use opencv::{
     types,
 };
 
+pub fn get_aruco_dictionary() -> opencv::Result<objdetect::Dictionary> {
+    objdetect::get_predefined_dictionary(objdetect::PredefinedDictionaryType::DICT_4X4_50)
+}
+
 pub fn generate_board(width: u8, height: u8) -> opencv::Result<CharucoBoard> {
     CharucoBoard::new(
         core::Size::new(width as i32, height as i32),
         0.04,
         0.02,
-        &objdetect::get_predefined_dictionary(objdetect::PredefinedDictionaryType::DICT_4X4_50)?,
+        &get_aruco_dictionary()?,
         &core::no_array(),
     )
 }
@@ -26,7 +30,7 @@ pub fn find_board(
     include_markers: bool,
 ) -> opencv::Result<Option<FoundBoard>> {
     let marker_detector = objdetect::ArucoDetector::new(
-        &objdetect::get_predefined_dictionary(objdetect::PredefinedDictionaryType::DICT_4X4_50)?,
+        &get_aruco_dictionary()?,
         &objdetect::DetectorParameters::default()?,
         objdetect::RefineParameters {
             min_rep_distance: 0.5,
