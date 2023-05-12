@@ -335,7 +335,11 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
 
         match own_ip.broadcast() {
             Some(broadcast) if set_broadcast && !ip.is_loopback() => {
-                self.scan_with_broadcast(broadcast)
+                self.scan_with_broadcast(broadcast)?;
+                assert!(
+                    self.sock.set_broadcast(false).is_ok(),
+                    "Couldn't unset broadcast?"
+                );
             }
             _ => {
                 let netmask = own_ip.netmask().expect("No netmask");
@@ -348,9 +352,11 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
                     ip,
                     scanning::get_netmask_bits(netmask) as usize,
                     scanning::TemplateMember::Fixed(MAIN_PORT),
-                ))
+                ))?;
             }
         }
+
+        Ok(())
     }
 
     #[allow(unused, clippy::ptr_arg)]
