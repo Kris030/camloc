@@ -128,13 +128,19 @@ fn main() -> Result<(), &'static str> {
     'outer_loop: loop {
         println!("Waiting for organizer...");
 
-        // wait for organizer ping
+        // wait for organizer ping / start
         let organizer = loop {
-            let (len, org) = socket
+            let (len, addr) = socket
                 .recv_from(&mut buf)
                 .map_err(|_| "Couldn't recieve organizer ping")?;
 
-            if len == 1 && buf[0] == Command::Ping.into() {
+            if len != 1 {
+                continue;
+            }
+
+            if buf[0] == Command::Start.into() {
+                break addr;
+            } else if buf[0] == Command::Ping.into() {
                 socket
                     .send_to(
                         &[HostStatus::Client {
@@ -143,23 +149,11 @@ fn main() -> Result<(), &'static str> {
                         }
                         .try_into()
                         .unwrap()],
-                        org,
+                        addr,
                     )
                     .map_err(|_| "Couldn't reply with status")?;
-                break org;
             }
         };
-
-        // wait for organizer start
-        loop {
-            let (len, addr) = socket
-                .recv_from(&mut buf)
-                .map_err(|_| "Couldn't recieve organizer ping")?;
-
-            if (addr == organizer) && (len == 1) && (buf[0] == Command::Start.into()) {
-                break;
-            }
-        }
 
         let mut cam = VideoCapture::new(args.camera_index as i32, videoio::CAP_ANY)
             .map_err(|_| "Couldn't create camera instance")?;
