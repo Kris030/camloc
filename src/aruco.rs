@@ -1,5 +1,6 @@
 use crate::track::Tracking;
 use crate::util::{self, Color};
+use camloc_common::calibration::get_aruco_dictionary;
 use opencv::{core, objdetect, prelude::*, types};
 
 pub struct Aruco {
@@ -16,10 +17,7 @@ impl Aruco {
     pub fn new(aruco_target: i32) -> Result<Self, &'static str> {
         Ok(Self {
             detector: objdetect::ArucoDetector::new(
-                &objdetect::get_predefined_dictionary(
-                    objdetect::PredefinedDictionaryType::DICT_4X4_50,
-                )
-                .map_err(|_| "Couldn't predefined aruco dictionary")?,
+                &get_aruco_dictionary().map_err(|_| "Couldn't predefined aruco dictionary")?,
                 &objdetect::DetectorParameters::default()
                     .map_err(|_| "Couldn't get default aruco detector parameters")?,
                 objdetect::RefineParameters {
