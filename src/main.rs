@@ -165,7 +165,7 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
         let addr = ((self.hosts[host_index]).ip, MAIN_PORT);
 
         self.sock
-            .send_to(&Into::<Vec<u8>>::into(Command::Start), addr)
+            .send_to(&[Command::START], addr)
             .map_err(|_| "Couldn't send client start")?;
 
         // wait for connection on the serversocket
