@@ -2,7 +2,7 @@ mod scanning;
 mod utils;
 
 use camloc_common::{
-    calibration::{self, display_image},
+    cv::{self, display_image},
     get_from_stdin,
     hosts::constants::MAIN_PORT,
     hosts::{constants::ORGANIZER_STARTER_PORT, ClientStatus, Command, HostStatus, ServerStatus},
@@ -165,7 +165,7 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
         let addr = ((self.hosts[host_index]).ip, MAIN_PORT);
 
         self.sock
-            .send_to(&[Command::Start.into()], addr)
+            .send_to(&Into::<Vec<u8>>::into(Command::Start), addr)
             .map_err(|_| "Couldn't send client start")?;
 
         // wait for connection on the serversocket
@@ -191,8 +191,7 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
             let height: u8 = get_from_stdin("  Charuco board height: ")?;
 
             Some((
-                calibration::generate_board(width, height)
-                    .map_err(|_| "Couldn't create charuco board")?,
+                cv::generate_board(width, height).map_err(|_| "Couldn't create charuco board")?,
                 vec![],
             ))
         } else {
@@ -201,18 +200,18 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
         };
 
         loop {
-            s.write_all(&[Command::RequestImage.into()])
+            s.write_all(&[Command::REQUEST_IMAGE])
                 .map_err(|_| "Couldn't request image")?;
 
             let img = self.get_image(&mut s)?;
 
             if let Some((board, imgs)) = &mut uncalibrated {
-                let detection = calibration::find_board(&img, board, false)
-                    .map_err(|_| "Couldn't find board")?;
+                let detection =
+                    cv::find_board(&img, board, false).map_err(|_| "Couldn't find board")?;
 
                 if let Some(fb) = detection {
                     let mut drawn_boards = img.clone();
-                    calibration::draw_board(&mut drawn_boards, &fb)
+                    cv::draw_board(&mut drawn_boards, &fb)
                         .map_err(|_| "Couldn't draw detected boards")?;
                     display_image(&drawn_boards, "recieved", true)
                         .map_err(|_| "Couldn't display image")?;
@@ -242,14 +241,14 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
                 break;
             }
         }
-        s.write_all(&[Command::ImagesDone.into()])
+        s.write_all(&[Command::IMAGES_DONE])
             .map_err(|_| "Couldn't send images done")?;
 
         let ip_bytes = server_ip.as_bytes();
         let ip_len = ip_bytes.len() as u16;
 
         let (pos, calib) = if let Some((board, images)) = &uncalibrated {
-            let calib = calibration::calibrate(
+            let calib = cv::calibrate(
                 board,
                 images,
                 images[0].size().map_err(|_| "Couldn't get image size??")?,
@@ -313,7 +312,7 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
 
         let addr = (self.hosts[host].ip, MAIN_PORT);
         self.sock
-            .send_to(&[Command::Stop.into()], addr)
+            .send_to(&[Command::STOP], addr)
             .map_err(|_| "Couldn't send client start")?;
 
         self.hosts.remove(host);
@@ -366,7 +365,7 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
 
     fn scan_with_broadcast(&mut self, broadcast: IpAddr) -> Result<(), &'static str> {
         self.sock
-            .send_to(&[Command::Ping.into()], (broadcast, MAIN_PORT))
+            .send_to(&[Command::PING], (broadcast, MAIN_PORT))
             .map_err(|_| "Couldn't send ping")?;
 
         let till = Instant::now() + WAIT_DURATION;
@@ -374,12 +373,9 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
         let mut hit_hosts = vec![false; self.hosts.len()];
 
         'loopy: while Instant::now() < till {
-            let Ok((msg_len, addr)) = self.sock.recv_from(self.buffer) else {
+            let Ok((1, addr)) = self.sock.recv_from(self.buffer) else {
                 continue;
             };
-            if msg_len != 1 {
-                continue;
-            }
 
             let ip = addr.ip();
             let Ok(status) = self.buffer[0].try_into() else {
