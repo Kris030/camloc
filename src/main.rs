@@ -4,11 +4,12 @@ mod util;
 
 use aruco::Aruco;
 use camloc_common::{
-    calibration::FullCameraInfo,
+    cv::FullCameraInfo,
     hosts::{
         constants::{MAIN_PORT, ORGANIZER_STARTER_PORT},
         ClientStatus, Command, HostStatus,
     },
+    position::Position,
 };
 use opencv::{
     core, highgui,
@@ -28,29 +29,17 @@ use crate::aruco::detect;
 const BUF_SIZE: usize = 2048;
 
 struct Config {
+    position: Position,
     calibration: FullCameraInfo,
     server: SocketAddr,
-    rotation: f64,
-    x: f64,
-    y: f64,
 }
 
 impl Config {
     fn to_connection_request(&self) -> Option<[u8; 33]> {
-        let cmd = Into::<u8>::into(Command::Connect).to_be_bytes();
-        let x = self.x.to_be_bytes();
-        let y = self.y.to_be_bytes();
-        let r = self.rotation.to_be_bytes();
-        let f = self.calibration.horizontal_fov.to_be_bytes();
-
-        [
-            cmd.as_slice(),
-            x.as_slice(),
-            y.as_slice(),
-            r.as_slice(),
-            f.as_slice(),
-        ]
-        .concat()
+        Into::<Vec<u8>>::into(Command::Connect {
+            position: self.position,
+            fov: self.calibration.horizontal_fov,
+        })
         .try_into()
         .ok()
     }
@@ -83,9 +72,7 @@ impl Config {
         };
 
         Ok(Self {
-            x,
-            y,
-            rotation,
+            position: Position::new(x, y, rotation),
             calibration,
             server,
         })
@@ -115,6 +102,17 @@ fn main() -> Result<(), &'static str> {
         Args::parse()
     };
 
+    #[allow(unused)]
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    ctrlc::set_handler(move || {
+        let _ = tx.send(());
+    })
+    .map_err(|_| "Couldn't set ctr+c handler")?;
+    // TODO: do da
+    // if rx.recv_timeout(Duration::from_millis(1)).is_ok() {
+
+    // }
+
     let cached_calibration = if let Ok(mut f) = File::open(&args.calibration_cache) {
         println!("Found calibration file");
         FullCameraInfo::from_be_bytes(&mut f).ok()
@@ -139,24 +137,22 @@ fn main() -> Result<(), &'static str> {
                 .recv_from(&mut buf)
                 .map_err(|_| "Couldn't recieve organizer ping")?;
 
-            if len != 1 {
-                continue;
-            }
-
-            if buf[0] == Command::Start.into() {
-                break addr;
-            } else if buf[0] == Command::Ping.into() {
-                socket
-                    .send_to(
-                        &[HostStatus::Client {
-                            status: ClientStatus::Idle,
-                            calibrated: cached_calibration.is_some(),
-                        }
-                        .try_into()
-                        .unwrap()],
-                        addr,
-                    )
-                    .map_err(|_| "Couldn't reply with status")?;
+            match buf[..len].try_into() {
+                Ok(Command::Start) => break addr,
+                Ok(Command::Ping) => {
+                    socket
+                        .send_to(
+                            &[HostStatus::Client {
+                                status: ClientStatus::Idle,
+                                calibrated: cached_calibration.is_some(),
+                            }
+                            .try_into()
+                            .unwrap()],
+                            addr,
+                        )
+                        .map_err(|_| "Couldn't reply with status")?;
+                }
+                _ => continue,
             }
         };
 
@@ -224,8 +220,8 @@ fn inner_loop(
             .set_read_timeout(Some(Duration::from_millis(1)))
             .map_err(|_| "Couldn't set read timeout?!?!??!")?;
 
-        if let Ok((1, addr)) = socket.recv_from(buf) {
-            match TryInto::<Command>::try_into(buf[0]) {
+        if let Ok((len, addr)) = socket.recv_from(buf) {
+            match buf[..len].try_into() {
                 Ok(Command::Stop) => break,
 
                 Ok(Command::Ping) => {
@@ -269,7 +265,7 @@ fn inner_loop(
 
         socket
             .send_to(
-                &[&[Command::ValueUpdate.into()], x.to_be_bytes().as_slice()].concat(),
+                &[&[Command::VALUE_UPDATE], x.to_be_bytes().as_slice()].concat(),
                 config.server,
             )
             .map_err(|_| "Couldn't send value")?;
@@ -297,10 +293,10 @@ fn get_config(
             s.read_exact(&mut buf[..1])
                 .map_err(|_| "Couldn't get organizer tcp command")?;
 
-            if buf[0] == Command::RequestImage.into() {
-                break 'request_wait_loop;
-            } else if buf[0] == Command::ImagesDone.into() {
-                break 'image_loop;
+            match buf.try_into() {
+                Ok(Command::RequestImage) => break 'request_wait_loop,
+                Ok(Command::ImagesDone) => break 'image_loop,
+                _ => (),
             }
         }
 

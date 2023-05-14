@@ -8,3 +8,4 @@ edition = "2021"
 camloc_common = { path = "../common", version = "0.1.0" }
 clap = { version = "4.2.4", features = ["derive"] }
 opencv = "0.80.0"
+ctrlc = "3.2.5"

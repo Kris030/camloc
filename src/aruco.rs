@@ -1,6 +1,6 @@
 use crate::track::Tracking;
 use crate::util::{self, Color};
-use camloc_common::calibration::get_aruco_dictionary;
+use camloc_common::cv::get_aruco_dictionary;
 use opencv::{core, objdetect, prelude::*, types};
 
 pub struct Aruco {
