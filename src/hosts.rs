@@ -170,9 +170,7 @@ impl From<Command<'_>> for Vec<u8> {
 
             Command::Connect { position, fov } => [
                 Command::CONNECT.to_be_bytes().as_slice(),
-                position.x.to_be_bytes().as_slice(),
-                position.y.to_be_bytes().as_slice(),
-                position.rotation.to_be_bytes().as_slice(),
+                position.to_be_bytes().as_slice(),
                 fov.to_be_bytes().as_slice(),
             ]
             .concat(),
@@ -200,9 +198,7 @@ impl From<Command<'_>> for Vec<u8> {
 
             Command::InfoUpdate { position, fov } => [
                 Command::INFO_UPDATE.to_be_bytes().as_slice(),
-                position.x.to_be_bytes().as_slice(),
-                position.y.to_be_bytes().as_slice(),
-                position.rotation.to_be_bytes().as_slice(),
+                position.to_be_bytes().as_slice(),
                 fov.to_be_bytes().as_slice(),
             ]
             .concat(),
