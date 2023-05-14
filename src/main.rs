@@ -102,13 +102,12 @@ fn main() -> Result<(), &'static str> {
         Args::parse()
     };
 
-    #[allow(unused)]
-    let (tx, rx) = std::sync::mpsc::channel::<()>();
-    ctrlc::set_handler(move || {
-        let _ = tx.send(());
-    })
-    .map_err(|_| "Couldn't set ctr+c handler")?;
     // TODO: do da
+    // let (tx, rx) = std::sync::mpsc::channel::<()>();
+    // ctrlc::set_handler(move || {
+    //     let _ = tx.send(());
+    // })
+    // .map_err(|_| "Couldn't set ctr+c handler")?;
     // if rx.recv_timeout(Duration::from_millis(1)).is_ok() {
 
     // }
