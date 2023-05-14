@@ -1,3 +1,7 @@
+use std::mem::size_of;
+
+use crate::position::Position;
+
 #[allow(clippy::unusual_byte_groupings)]
 pub mod constants {
     pub const UDP_MAX_MESSAGE_LENGTH: usize = 65507;
@@ -131,60 +135,145 @@ pub enum ServerStatus {
 }
 
 #[derive(Clone, Copy)]
-pub enum Command {
-    Ping = Command::PING as isize,
+#[must_use]
+pub enum Command<'a> {
+    Ping,
 
-    Connect = Command::CONNECT as isize,
+    Connect { position: Position, fov: f64 },
 
-    Start = Command::START as isize,
-    StartConfigless = Command::START_CONFIGLESS as isize,
-    Stop = Command::STOP as isize,
+    Start,
+    StartConfigless { ip: &'a str },
+    Stop,
 
-    RequestImage = Command::REQUEST_IMAGE as isize,
-    ImagesDone = Command::IMAGES_DONE as isize,
+    RequestImage,
+    ImagesDone,
 
-    ValueUpdate = Command::VALUE_UPDATE as isize,
-    InfoUpdate = Command::INFO_UPDATE as isize,
+    ValueUpdate(f64),
+    InfoUpdate { position: Position, fov: f64 },
 }
-impl Command {
-    const PING: u8 = 0x0b;
-    const CONNECT: u8 = 0xcc;
-    const START: u8 = 0x60;
-    const START_CONFIGLESS: u8 = 0x6c;
-    const STOP: u8 = 0xcd;
-    const REQUEST_IMAGE: u8 = 0x17;
-    const IMAGES_DONE: u8 = 0x1d;
-    const VALUE_UPDATE: u8 = 0x21;
-    const INFO_UPDATE: u8 = 0x1f;
+impl Command<'_> {
+    pub const PING: u8 = 0x0b;
+    pub const CONNECT: u8 = 0xcc;
+    pub const START: u8 = 0x60;
+    pub const START_CONFIGLESS: u8 = 0x6c;
+    pub const STOP: u8 = 0xcd;
+    pub const REQUEST_IMAGE: u8 = 0x17;
+    pub const IMAGES_DONE: u8 = 0x1d;
+    pub const VALUE_UPDATE: u8 = 0x21;
+    pub const INFO_UPDATE: u8 = 0x1f;
 }
 
-impl From<Command> for u8 {
+impl From<Command<'_>> for Vec<u8> {
     fn from(value: Command) -> Self {
-        value as u8
+        match value {
+            Command::Ping => vec![Command::PING],
+
+            Command::Connect { position, fov } => [
+                Command::CONNECT.to_be_bytes().as_slice(),
+                position.x.to_be_bytes().as_slice(),
+                position.y.to_be_bytes().as_slice(),
+                position.rotation.to_be_bytes().as_slice(),
+                fov.to_be_bytes().as_slice(),
+            ]
+            .concat(),
+
+            Command::Start => vec![Command::START],
+
+            Command::StartConfigless { ip } => [
+                Command::START_CONFIGLESS.to_be_bytes().as_slice(),
+                (ip.len() as u16).to_be_bytes().as_slice(),
+                ip.as_bytes(),
+            ]
+            .concat(),
+
+            Command::Stop => vec![Command::STOP],
+
+            Command::RequestImage => vec![Command::REQUEST_IMAGE],
+
+            Command::ImagesDone => vec![Command::IMAGES_DONE],
+
+            Command::ValueUpdate(v) => [
+                Command::VALUE_UPDATE.to_be_bytes().as_slice(),
+                v.to_be_bytes().as_slice(),
+            ]
+            .concat(),
+
+            Command::InfoUpdate { position, fov } => [
+                Command::INFO_UPDATE.to_be_bytes().as_slice(),
+                position.x.to_be_bytes().as_slice(),
+                position.y.to_be_bytes().as_slice(),
+                position.rotation.to_be_bytes().as_slice(),
+                fov.to_be_bytes().as_slice(),
+            ]
+            .concat(),
+        }
     }
 }
 
-impl TryInto<Command> for u8 {
+impl<'a> TryFrom<&'a [u8]> for Command<'a> {
     type Error = ();
 
-    fn try_into(self) -> Result<Command, Self::Error> {
-        use Command::*;
-
-        match self {
-            x if x == Ping as u8 => Ok(Ping),
-            x if x == Connect as u8 => Ok(Connect),
-
-            x if x == Start as u8 => Ok(Start),
-            x if x == StartConfigless as u8 => Ok(StartConfigless),
-            x if x == Stop as u8 => Ok(Stop),
-
-            x if x == RequestImage as u8 => Ok(RequestImage),
-            x if x == ImagesDone as u8 => Ok(ImagesDone),
-
-            x if x == ValueUpdate as u8 => Ok(ValueUpdate),
-            x if x == InfoUpdate as u8 => Ok(InfoUpdate),
-
-            _ => Err(()),
+    fn try_from(buf: &'a [u8]) -> Result<Self, Self::Error> {
+        let len = buf.len();
+        if len < 1 {
+            return Err(());
         }
+
+        // without the command byte
+        let len = len - 1;
+        let cmd = buf[0];
+        let buf = &buf[1..];
+
+        Ok(match cmd {
+            Command::PING if len == 0 => Command::Ping,
+            Command::START if len == 0 => Command::Start,
+            Command::STOP if len == 0 => Command::Stop,
+            Command::REQUEST_IMAGE if len == 0 => Command::RequestImage,
+            Command::IMAGES_DONE if len == 0 => Command::ImagesDone,
+
+            Command::VALUE_UPDATE if len == size_of::<f64>() => Command::ValueUpdate(
+                f64::from_be_bytes(buf[..size_of::<f64>()].try_into().map_err(|_| ())?),
+            ),
+
+            Command::CONNECT if len == 4 * size_of::<f64>() => Command::Connect {
+                position: Position::from_be_bytes(&buf[..24].try_into().unwrap()),
+                fov: f64::from_be_bytes(
+                    buf[3 * size_of::<f64>()..4 * size_of::<f64>()]
+                        .try_into()
+                        .map_err(|_| ())?,
+                ),
+            },
+
+            Command::INFO_UPDATE if len == 4 * size_of::<f64>() => Command::InfoUpdate {
+                position: Position::from_be_bytes(&buf[..24].try_into().unwrap()),
+                fov: f64::from_be_bytes(
+                    buf[3 * size_of::<f64>()..4 * size_of::<f64>()]
+                        .try_into()
+                        .map_err(|_| ())?,
+                ),
+            },
+
+            Command::START_CONFIGLESS if len >= size_of::<u16>() => {
+                let ip_len = u16::from_be_bytes(buf[..size_of::<u16>()].try_into().map_err(|_| ())?)
+                    as usize;
+                if len != size_of::<u16>() + ip_len {
+                    return Err(());
+                }
+
+                Command::StartConfigless {
+                    ip: std::str::from_utf8(&buf[size_of::<u16>()..size_of::<u16>() + ip_len])
+                        .map_err(|_| ())?,
+                }
+            }
+
+            _ => return Err(()),
+        })
+    }
+}
+
+impl<'a> TryFrom<&'a mut [u8]> for Command<'a> {
+    type Error = ();
+    fn try_from(buf: &'a mut [u8]) -> Result<Self, Self::Error> {
+        (&*buf).try_into()
     }
 }

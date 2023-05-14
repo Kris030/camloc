@@ -11,6 +11,22 @@ impl Position {
     pub const fn new(x: f64, y: f64, rotation: f64) -> Self {
         Position { x, y, rotation }
     }
+    pub fn from_be_bytes(b: &[u8; 24]) -> Self {
+        Self::new(
+            f64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]),
+            f64::from_be_bytes([b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]]),
+            f64::from_be_bytes([b[16], b[17], b[18], b[19], b[20], b[21], b[22], b[23]]),
+        )
+    }
+    pub fn to_be_bytes(&self) -> [u8; 24] {
+        let x = self.x.to_be_bytes();
+        let y = self.y.to_be_bytes();
+        let r = self.rotation.to_be_bytes();
+        [
+            x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], y[0], y[1], y[2], y[3], y[4], y[5],
+            y[6], y[7], r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7],
+        ]
+    }
 }
 
 impl From<(f64, f64, f64)> for Position {

@@ -1,4 +1,4 @@
-pub mod calibration;
+pub mod cv;
 pub mod hosts;
 pub mod position;
 
@@ -60,8 +60,10 @@ pub fn get_from_stdin<T: std::str::FromStr>(prompt: &str) -> Result<T, &'static 
         .read_line(&mut l)
         .map_err(|_| "Couldn't get line")?;
 
-    l.get(..(l.len() - 1))
-        .ok_or("Empty")?
-        .parse()
-        .map_err(|_| "Invalid index")
+    if l.is_empty() {
+        return Err("Empty value");
+    }
+
+    // exclude newline at the end
+    l[..l.len() - 1].parse().map_err(|_| "Invalid value")
 }
