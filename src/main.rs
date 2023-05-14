@@ -292,7 +292,7 @@ fn get_config(
             s.read_exact(&mut buf[..1])
                 .map_err(|_| "Couldn't get organizer tcp command")?;
 
-            match buf.try_into() {
+            match buf[..1].try_into() {
                 Ok(Command::RequestImage) => break 'request_wait_loop,
                 Ok(Command::ImagesDone) => break 'image_loop,
                 _ => (),
