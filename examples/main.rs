@@ -4,10 +4,7 @@ use camloc_server::{
     service::{LocationService, TimedPosition},
 };
 use std::time::Duration;
-use tokio::{
-    sync::oneshot::{self, Receiver, Sender},
-    time::sleep,
-};
+use tokio::sync::watch;
 
 fn main() {
     if let Err(e) = run() {
@@ -67,22 +64,15 @@ async fn run() -> Result<(), String> {
             .expect("Couldn't write coords to stderr???");
     }
 
-    static mut CHAN: (Option<Sender<()>>, Option<Receiver<()>>) = (None, None);
-    unsafe {
-        let (rx, tx) = oneshot::channel();
-        CHAN = (Some(rx), Some(tx));
-    }
-    let mut rx = unsafe { &mut CHAN.1 }.take().unwrap();
-
-    fn ctrlc_handler() {
-        println!("ctrlc pressed");
-        let Some(tx) = unsafe { &mut CHAN.0 }.take() else {
-            return;
-        };
-
-        tx.send(()).unwrap();
-    }
-    let _ = ctrlc::set_handler(ctrlc_handler);
+    let (tx, mut rx) = watch::channel(());
+    // needed because of static lifetime
+    let tx = Box::leak(tx.into());
+    ctrlc::set_handler(|| {
+        if tx.send(()).is_err() {
+            println!("ctrlc pressed but unable to handle signal");
+        }
+    })
+    .map_err(|_| "Couldn't setup ctrl+c handler")?;
 
     if true {
         location_service
@@ -91,7 +81,9 @@ async fn run() -> Result<(), String> {
             })
             .await;
 
-        rx.await.map_err(|_| "Something failed in the channel")?;
+        rx.changed()
+            .await
+            .map_err(|_| "Something failed in the ctrl+c channel")?;
         location_service.stop().await;
     } else {
         loop {
@@ -101,12 +93,11 @@ async fn run() -> Result<(), String> {
                 println!("Couldn't get position");
             }
 
-            let rec = rx.try_recv();
-            use tokio::sync::oneshot::error::TryRecvError;
-            match rec {
-                Err(TryRecvError::Closed) => return Err("Channel closed???".to_string()),
-                Err(TryRecvError::Empty) => sleep(Duration::from_millis(10)).await,
-                Ok(()) => break,
+            if rx
+                .has_changed()
+                .map_err(|_| "Something failed in the ctrl+c channel")?
+            {
+                break;
             }
         }
     }

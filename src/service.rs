@@ -6,7 +6,6 @@ use camloc_common::{
 use std::{
     f64::NAN,
     fmt::{Debug, Display},
-    mem,
     net::SocketAddr,
     sync::Arc,
     time::{Duration, Instant},
@@ -88,7 +87,13 @@ impl LocationService {
             .map_err(|_| "Couldn't create socket")?;
 
         let instance = LocationService {
-            last_known_pos: TimedPosition::default().into(),
+            last_known_pos: TimedPosition {
+                start_time,
+                time: start_time,
+                position: Position::new(NAN, NAN, NAN),
+                interpolated: None,
+            }
+            .into(),
             setup: Setup::new_freehand(vec![]).into(),
             connection_subscriptions: vec![].into(),
             start_time: start_time.into(),
@@ -134,9 +139,9 @@ impl LocationService {
 
             let recv_time = Instant::now();
 
-            match recv_len {
+            match buf[..recv_len].try_into() {
                 // "organizer bonk"
-                1 if buf[0] == Command::Ping.into() => {
+                Ok(Command::Ping) => {
                     udp_socket
                         .send_to(
                             &[HostStatus::Server(Running).try_into().unwrap()],
@@ -147,7 +152,7 @@ impl LocationService {
                 }
 
                 // update value
-                9 if buf[0] == Command::ValueUpdate.into() => {
+                Ok(Command::ValueUpdate(value)) => {
                     let mut clients = self.clients.lock().await;
                     let mut ci = None;
                     let (mut mins, mut mini) = (0, 0);
@@ -170,9 +175,7 @@ impl LocationService {
                         }
                     }
                     if let Some(ci) = ci {
-                        clients[ci]
-                            .last_value
-                            .set((f64::from_be_bytes(buf[1..9].try_into().unwrap()), recv_time));
+                        clients[ci].last_value.set((value, recv_time));
 
                         if mins == 1 && mini == ci {
                             min_generation += 1;
@@ -182,18 +185,13 @@ impl LocationService {
                 }
 
                 // connection request
-                33 if buf[0] == Command::Connect.into() => {
-                    let x = f64::from_be_bytes(buf[1..9].try_into().unwrap());
-                    let y = f64::from_be_bytes(buf[9..17].try_into().unwrap());
-                    let r = f64::from_be_bytes(buf[17..25].try_into().unwrap());
-                    let f = f64::from_be_bytes(buf[25..33].try_into().unwrap());
-
+                Ok(Command::Connect { position, fov }) => {
                     self.clients.lock().await.push(ClientInfo::new(
                         recv_addr,
                         GenerationalValue::new_with_generation((NAN, start_time), min_generation),
                     ));
 
-                    let cam = PlacedCamera::new(Position::new(x, y, r), f);
+                    let cam = PlacedCamera::new(position, fov);
                     self.setup.write().await.cameras.push(cam);
 
                     for s in self.connection_subscriptions.read().await.iter() {
@@ -202,7 +200,7 @@ impl LocationService {
                 }
 
                 // TODO: update value
-                9 if buf[0] == Command::InfoUpdate.into() => todo!(),
+                Ok(Command::InfoUpdate { .. }) => todo!(),
 
                 _ => return Err("Recieved invalid number of bytes".to_string()),
             }
@@ -210,7 +208,7 @@ impl LocationService {
 
         for c in self.clients.lock().await.iter() {
             udp_socket
-                .send_to(&[Command::Stop.into()], c.address)
+                .send_to(&[Command::STOP], c.address)
                 .await
                 .map_err(|_| "Couldn't tell all clients to stop")?;
         }
@@ -276,7 +274,7 @@ impl LocationServiceHandle {
         let now = Instant::now();
 
         let ex = self.service.extrap.read().await;
-        if let Some(x) = (*ex).as_ref() {
+        if let Some(x) = &*ex {
             if now > pos.time + x.invalidate_after {
                 return None;
             }
@@ -311,17 +309,6 @@ pub struct TimedPosition {
     /// - None - not interpolated
     /// - Some(d) - interpolated by d time
     pub interpolated: Option<Duration>,
-}
-
-impl Default for TimedPosition {
-    fn default() -> Self {
-        Self {
-            start_time: unsafe { mem::transmute([0u8; 16]) },
-            time: unsafe { mem::transmute([0u8; 16]) },
-            position: Position::new(NAN, NAN, NAN),
-            interpolated: None,
-        }
-    }
 }
 
 impl Display for TimedPosition {
