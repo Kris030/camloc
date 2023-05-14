@@ -1,6 +1,4 @@
-use camloc_common::calibration::{
-    calibrate, draw_charuco_board, find_board, generate_board, CameraParams,
-};
+use camloc_common::cv::{calibrate, draw_charuco_board, find_board, generate_board, CameraParams};
 use clap::{Parser, Subcommand};
 use opencv::{
     core, highgui, imgcodecs, objdetect::CharucoBoard, prelude::*, videoio::VideoCapture,
