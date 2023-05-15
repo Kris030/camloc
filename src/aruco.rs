@@ -8,13 +8,13 @@ pub struct Aruco {
     corners: types::VectorOfVectorOfPoint2f,
     rejected: types::VectorOfVectorOfPoint2f,
     marker_ids: core::Vector<i32>,
-    aruco_target: i32,
+    cube: [u8; 4],
 }
 
 impl Aruco {
     /// setup new aruco detector
     /// generate targets with: https://chev.me/arucogen/
-    pub fn new(aruco_target: i32) -> Result<Self, &'static str> {
+    pub fn new(cube: [u8; 4]) -> Result<Self, &'static str> {
         Ok(Self {
             detector: objdetect::ArucoDetector::new(
                 &get_aruco_dictionary().map_err(|_| "Couldn't predefined aruco dictionary")?,
@@ -30,7 +30,7 @@ impl Aruco {
             corners: types::VectorOfVectorOfPoint2f::new(),
             rejected: types::VectorOfVectorOfPoint2f::new(),
             marker_ids: core::Vector::new(),
-            aruco_target,
+            cube,
         })
     }
 
@@ -49,7 +49,7 @@ impl Aruco {
             )
             .map_err(|_| "Couldn't detect markers")?;
 
-        let Some(index) = self.marker_ids.iter().position(|s| s == self.aruco_target) else {
+        let Some(index) = self.marker_ids.iter().position(|s| self.cube.contains(&(s as u8))) else {
             return Ok(None);
         };
 

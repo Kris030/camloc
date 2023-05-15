@@ -7,7 +7,7 @@ use camloc_common::{
     cv::FullCameraInfo,
     hosts::{
         constants::{MAIN_PORT, ORGANIZER_STARTER_PORT},
-        ClientStatus, Command, HostStatus,
+        Command, HostInfo, HostState, HostType,
     },
     position::Position,
 };
@@ -17,6 +17,7 @@ use opencv::{
     videoio::{self, VideoCapture},
 };
 use std::{
+    f64::NAN,
     fs::File,
     io::{Read, Write},
     net::{IpAddr, SocketAddr, TcpStream, UdpSocket},
@@ -32,6 +33,7 @@ struct Config {
     position: Position,
     calibration: FullCameraInfo,
     server: SocketAddr,
+    cube: [u8; 4],
 }
 
 impl Config {
@@ -71,10 +73,14 @@ impl Config {
             FullCameraInfo::from_be_bytes(r).map_err(|_| "Couldn't get camera info")?
         };
 
+        let mut cube = [0; 4];
+        r.read_exact(&mut cube).map_err(|_| "Couldn't get cube")?;
+
         Ok(Self {
             position: Position::new(x, y, rotation),
             calibration,
             server,
+            cube: cube.map(u8::from_be),
         })
     }
 }
@@ -87,7 +93,7 @@ fn main() -> Result<(), &'static str> {
         #[derive(Parser)]
         struct Args {
             /// The camera index to use
-            #[arg(short, long, default_value_t = 0u16)]
+            #[arg(long, default_value_t = 0u16)]
             camera_index: u16,
 
             /// Calibration cache file
@@ -120,7 +126,6 @@ fn main() -> Result<(), &'static str> {
     };
 
     let mut frame = Mat::default();
-    let mut aruco = Aruco::new(2)?;
     let mut tracker = Tracking::new()?;
 
     let socket =
@@ -141,11 +146,12 @@ fn main() -> Result<(), &'static str> {
                 Ok(Command::Ping) => {
                     socket
                         .send_to(
-                            &[HostStatus::Client {
-                                status: ClientStatus::Idle,
-                                calibrated: cached_calibration.is_some(),
-                            }
-                            .try_into()
+                            &[TryInto::<u8>::try_into(HostInfo {
+                                host_type: HostType::Client {
+                                    calibrated: cached_calibration.is_some(),
+                                },
+                                host_state: HostState::Idle,
+                            })
                             .unwrap()],
                             addr,
                         )
@@ -182,7 +188,6 @@ fn main() -> Result<(), &'static str> {
             &socket,
             &mut cam,
             &mut tracker,
-            &mut aruco,
             config,
             &mut buf,
             &mut frame,
@@ -191,12 +196,10 @@ fn main() -> Result<(), &'static str> {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn inner_loop(
     socket: &UdpSocket,
     cam: &mut VideoCapture,
     tracker: &mut Tracking,
-    aruco: &mut Aruco,
     config: Config,
     buf: &mut [u8],
     mut frame: &mut Mat,
@@ -204,6 +207,7 @@ fn inner_loop(
 ) -> Result<(), &'static str> {
     let mut draw = Mat::default();
     let mut has_object = false;
+    let mut aruco = Aruco::new(config.cube)?;
 
     if gui {
         highgui::named_window("videocap", highgui::WINDOW_AUTOSIZE)
@@ -226,9 +230,9 @@ fn inner_loop(
                 Ok(Command::Ping) => {
                     socket
                         .send_to(
-                            &[HostStatus::Client {
-                                status: ClientStatus::Running,
-                                calibrated: true,
+                            &[HostInfo {
+                                host_type: HostType::Client { calibrated: true },
+                                host_state: HostState::Running,
                             }
                             .try_into()
                             .unwrap()],
@@ -256,7 +260,7 @@ fn inner_loop(
             .copy_to(&mut draw)
             .map_err(|_| "Couldn't copy frame")?;
 
-        let x = detect(frame, Some(&mut draw), &mut has_object, aruco, tracker)?;
+        let x = detect(frame, Some(&mut draw), &mut has_object, &mut aruco, tracker)?;
 
         if gui {
             highgui::imshow("videocap", &draw).map_err(|_| "Couldn't show frame")?;
@@ -264,7 +268,11 @@ fn inner_loop(
 
         socket
             .send_to(
-                &[&[Command::VALUE_UPDATE], x.to_be_bytes().as_slice()].concat(),
+                &Into::<Vec<u8>>::into(Command::ValueUpdate {
+                    marker_id: 0,
+                    value: x,
+                    rotation: (NAN, NAN, NAN),
+                }),
                 config.server,
             )
             .map_err(|_| "Couldn't send value")?;
