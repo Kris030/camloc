@@ -127,6 +127,12 @@ impl LocationService {
         let mut buf = [0u8; 64];
 
         let (cube, organizer) = loop {
+            let r = self.running.read().await;
+            if !*r {
+                return Ok(());
+            }
+            drop(r);
+
             let Ok((len, addr)) = udp_socket.recv_from(&mut buf).await else {
                 continue;
             };
