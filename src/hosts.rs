@@ -288,6 +288,10 @@ impl<'a> TryFrom<&'a [u8]> for Command<'a> {
                 }
             }
 
+            Command::START_SERVER if len == 4 => Command::StartServer {
+                cube: [buf[0], buf[1], buf[2], buf[3]],
+            },
+
             _ => return Err(()),
         })
     }
