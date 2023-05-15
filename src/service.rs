@@ -137,7 +137,7 @@ impl LocationService {
                         .send_to(
                             &[HostInfo {
                                 host_type: HostType::Server,
-                                host_state: HostState::Running,
+                                host_state: HostState::Idle,
                             }
                             .try_into()
                             .unwrap()],
