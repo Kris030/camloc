@@ -1,12 +1,14 @@
 use camloc_common::{
-    hosts::{Command, HostStatus, ServerStatus::Running},
+    hosts::{Command, HostInfo, HostState, HostType},
     position::Position,
     GenerationalValue,
 };
 use std::{
     f64::NAN,
     fmt::{Debug, Display},
+    future::Future,
     net::SocketAddr,
+    pin::Pin,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -37,12 +39,15 @@ impl ClientInfo {
     }
 }
 
-type ConnectionSubscriber = fn(SocketAddr, PlacedCamera) -> ();
-type ServiceSubscriber = fn(TimedPosition) -> ();
+type SubscriberFnRet = Pin<Box<dyn Future<Output = ()> + Send>>;
+
+pub enum Subscriber {
+    Connection(fn(SocketAddr, PlacedCamera) -> SubscriberFnRet),
+    Position(fn(TimedPosition) -> SubscriberFnRet),
+}
 
 pub struct LocationService {
-    connection_subscriptions: RwLock<Vec<ConnectionSubscriber>>,
-    subscriptions: RwLock<Vec<ServiceSubscriber>>,
+    subscriptions: RwLock<Vec<Subscriber>>,
     extrap: RwLock<Option<Extrapolation>>,
     last_known_pos: RwLock<TimedPosition>,
     clients: Mutex<Vec<ClientInfo>>,
@@ -95,9 +100,8 @@ impl LocationService {
             }
             .into(),
             setup: Setup::new_freehand(vec![]).into(),
-            connection_subscriptions: vec![].into(),
-            start_time: start_time.into(),
             subscriptions: vec![].into(),
+            start_time: start_time.into(),
             extrap: extrapolation.into(),
             clients: vec![].into(),
             running: true.into(),
@@ -122,6 +126,30 @@ impl LocationService {
         let mut min_generation = 0;
         let mut buf = [0u8; 64];
 
+        let (cube, organizer) = loop {
+            let Ok((len, addr)) = udp_socket.recv_from(&mut buf).await else {
+                continue;
+            };
+            match buf[..len].try_into() {
+                Ok(Command::StartServer { cube }) => break (cube, addr),
+                Ok(Command::Ping) => {
+                    udp_socket
+                        .send_to(
+                            &[HostInfo {
+                                host_type: HostType::Server,
+                                host_state: HostState::Running,
+                            }
+                            .try_into()
+                            .unwrap()],
+                            addr,
+                        )
+                        .await
+                        .map_err(|_| "Error while sending")?;
+                }
+                _ => (),
+            }
+        };
+
         loop {
             let r = self.running.read().await;
             if !*r {
@@ -144,7 +172,12 @@ impl LocationService {
                 Ok(Command::Ping) => {
                     udp_socket
                         .send_to(
-                            &[HostStatus::Server(Running).try_into().unwrap()],
+                            &[HostInfo {
+                                host_type: HostType::Server,
+                                host_state: HostState::Running,
+                            }
+                            .try_into()
+                            .unwrap()],
                             recv_addr,
                         )
                         .await
@@ -152,7 +185,11 @@ impl LocationService {
                 }
 
                 // update value
-                Ok(Command::ValueUpdate(value)) => {
+                Ok(Command::ValueUpdate {
+                    marker_id,
+                    value,
+                    rotation,
+                }) => {
                     let mut clients = self.clients.lock().await;
                     let mut ci = None;
                     let (mut mins, mut mini) = (0, 0);
@@ -194,8 +231,10 @@ impl LocationService {
                     let cam = PlacedCamera::new(position, fov);
                     self.setup.write().await.cameras.push(cam);
 
-                    for s in self.connection_subscriptions.read().await.iter() {
-                        s(recv_addr, cam);
+                    for s in self.subscriptions.read().await.iter() {
+                        if let Subscriber::Connection(s) = s {
+                            s(recv_addr, cam).await;
+                        }
                     }
                 }
 
@@ -242,7 +281,9 @@ impl LocationService {
 
         let subs = self.subscriptions.read().await;
         for s in subs.iter() {
-            s(calculated_position);
+            if let Subscriber::Position(s) = s {
+                s(calculated_position).await;
+            }
         }
 
         Ok(())
@@ -250,12 +291,7 @@ impl LocationService {
 }
 
 impl LocationServiceHandle {
-    pub async fn subscribe_connection(&self, action: ConnectionSubscriber) {
-        let mut sw = self.service.connection_subscriptions.write().await;
-        sw.push(action);
-    }
-
-    pub async fn subscribe(&self, action: ServiceSubscriber) {
+    pub async fn subscribe(&self, action: Subscriber) {
         let mut sw = self.service.subscriptions.write().await;
         sw.push(action);
     }
