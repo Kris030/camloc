@@ -32,31 +32,29 @@ pub mod constants {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum HostStatus {
-    ConfiglessClient(ClientStatus),
-    Server(ServerStatus),
-    Client {
-        status: ClientStatus,
-        calibrated: bool,
-    },
+pub enum HostType {
+    ConfiglessClient,
+    Server,
+    Client { calibrated: bool },
 }
 
-impl TryInto<u8> for HostStatus {
+#[derive(Debug, Clone, Copy)]
+pub struct HostInfo {
+    pub host_type: HostType,
+    pub host_state: HostState,
+}
+
+impl TryInto<u8> for HostInfo {
     type Error = ();
 
     fn try_into(self) -> Result<u8, Self::Error> {
         use constants::status_reply::{host_type::*, masks, state::*};
-        use ClientStatus::*;
-        use HostStatus::*;
+        use HostState::*;
+        use HostType::*;
 
-        Ok(match self {
-            Client { status, calibrated } => {
+        Ok(match self.host_type {
+            Client { calibrated } => {
                 CLIENT
-                    | (match status {
-                        Unreachable => return Err(()),
-                        Running => RUNNING,
-                        Idle => IDLE,
-                    })
                     | (if calibrated {
                         masks::CALIBRATED & masks::ONES
                     } else {
@@ -64,74 +62,55 @@ impl TryInto<u8> for HostStatus {
                     })
             }
 
-            ConfiglessClient(s) => {
-                CONFIGLESS
-                    | (match s {
-                        Unreachable => return Err(()),
-                        Running => RUNNING,
-                        Idle => IDLE,
-                    })
-            }
-
-            Server(s) => {
-                SERVER
-                    | (match s {
-                        ServerStatus::Unreachable => return Err(()),
-                        ServerStatus::Running => RUNNING,
-                    })
-            }
-        })
+            ConfiglessClient => CONFIGLESS,
+            Server => SERVER,
+        } | (match self.host_state {
+            Unreachable => return Err(()),
+            Running => RUNNING,
+            Idle => IDLE,
+        }))
     }
 }
 
-impl TryFrom<u8> for HostStatus {
+impl TryFrom<u8> for HostInfo {
     type Error = ();
 
     fn try_from(v: u8) -> Result<Self, Self::Error> {
         use constants::status_reply::{host_type::*, masks, state::*};
-        use ClientStatus::*;
-        use HostStatus::*;
+        use HostState::*;
+        use HostType::*;
 
-        match v & masks::HOST_TYPE {
-            CONFIGLESS => match v & masks::STATE {
-                RUNNING => Ok(ConfiglessClient(Running)),
-                IDLE => Ok(ConfiglessClient(Idle)),
-                _ => Err(()),
-            },
+        let host_type = match v & masks::HOST_TYPE {
+            CONFIGLESS => ConfiglessClient,
 
             CLIENT => {
                 let calibrated = (v & masks::CALIBRATED) != 0;
-                match v & masks::STATE {
-                    RUNNING => Ok(Client {
-                        calibrated,
-                        status: Running,
-                    }),
-                    IDLE => Ok(Client {
-                        calibrated,
-                        status: Idle,
-                    }),
-                    _ => Err(()),
-                }
+                Client { calibrated }
             }
 
-            SERVER => Ok(Server(ServerStatus::Running)),
+            SERVER => Server,
 
-            _ => Err(()),
-        }
+            _ => return Err(()),
+        };
+
+        let host_state = match v & masks::STATE {
+            RUNNING => Running,
+            IDLE => Idle,
+            _ => return Err(()),
+        };
+
+        Ok(HostInfo {
+            host_type,
+            host_state,
+        })
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum ClientStatus {
+pub enum HostState {
     Unreachable,
     Running,
     Idle,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum ServerStatus {
-    Unreachable,
-    Running,
 }
 
 #[derive(Clone, Copy)]
@@ -139,22 +118,38 @@ pub enum ServerStatus {
 pub enum Command<'a> {
     Ping,
 
-    Connect { position: Position, fov: f64 },
+    Connect {
+        position: Position,
+        fov: f64,
+    },
 
     Start,
-    StartConfigless { ip: &'a str },
+    StartServer {
+        cube: [u8; 4],
+    },
+    StartConfigless {
+        ip: &'a str,
+    },
     Stop,
 
     RequestImage,
     ImagesDone,
 
-    ValueUpdate(f64),
-    InfoUpdate { position: Position, fov: f64 },
+    ValueUpdate {
+        marker_id: u8,
+        value: f64,
+        rotation: (f64, f64, f64),
+    },
+    InfoUpdate {
+        position: Position,
+        fov: f64,
+    },
 }
 impl Command<'_> {
     pub const PING: u8 = 0x0b;
     pub const CONNECT: u8 = 0xcc;
     pub const START: u8 = 0x60;
+    pub const START_SERVER: u8 = 0x55;
     pub const START_CONFIGLESS: u8 = 0x6c;
     pub const STOP: u8 = 0xcd;
     pub const REQUEST_IMAGE: u8 = 0x17;
@@ -176,6 +171,11 @@ impl From<Command<'_>> for Vec<u8> {
             .concat(),
 
             Command::Start => vec![Command::START],
+            Command::StartServer { cube } => vec![
+                Command::START_SERVER.to_be_bytes().as_slice(),
+                cube.map(u8::to_be).as_slice(),
+            ]
+            .concat(),
 
             Command::StartConfigless { ip } => [
                 Command::START_CONFIGLESS.to_be_bytes().as_slice(),
@@ -190,9 +190,17 @@ impl From<Command<'_>> for Vec<u8> {
 
             Command::ImagesDone => vec![Command::IMAGES_DONE],
 
-            Command::ValueUpdate(v) => [
+            Command::ValueUpdate {
+                marker_id,
+                value,
+                rotation,
+            } => [
                 Command::VALUE_UPDATE.to_be_bytes().as_slice(),
-                v.to_be_bytes().as_slice(),
+                marker_id.to_be_bytes().as_slice(),
+                value.to_be_bytes().as_slice(),
+                rotation.0.to_be_bytes().as_slice(),
+                rotation.1.to_be_bytes().as_slice(),
+                rotation.2.to_be_bytes().as_slice(),
             ]
             .concat(),
 
@@ -216,8 +224,8 @@ impl<'a> TryFrom<&'a [u8]> for Command<'a> {
         }
 
         // without the command byte
-        let len = len - 1;
         let cmd = buf[0];
+        let len = len - 1;
         let buf = &buf[1..];
 
         Ok(match cmd {
@@ -227,9 +235,27 @@ impl<'a> TryFrom<&'a [u8]> for Command<'a> {
             Command::REQUEST_IMAGE if len == 0 => Command::RequestImage,
             Command::IMAGES_DONE if len == 0 => Command::ImagesDone,
 
-            Command::VALUE_UPDATE if len == size_of::<f64>() => Command::ValueUpdate(
-                f64::from_be_bytes(buf[..size_of::<f64>()].try_into().map_err(|_| ())?),
-            ),
+            Command::VALUE_UPDATE if len == 1 + 4 * size_of::<f64>() => Command::ValueUpdate {
+                marker_id: u8::from_be(buf[0]),
+                value: f64::from_be_bytes(buf[1..size_of::<f64>() + 1].try_into().map_err(|_| ())?),
+                rotation: (
+                    f64::from_be_bytes(
+                        buf[size_of::<f64>() + 1..2 * size_of::<f64>() + 1]
+                            .try_into()
+                            .map_err(|_| ())?,
+                    ),
+                    f64::from_be_bytes(
+                        buf[2 * size_of::<f64>() + 1..3 * size_of::<f64>() + 1]
+                            .try_into()
+                            .map_err(|_| ())?,
+                    ),
+                    f64::from_be_bytes(
+                        buf[3 * size_of::<f64>() + 1..4 * size_of::<f64>() + 1]
+                            .try_into()
+                            .map_err(|_| ())?,
+                    ),
+                ),
+            },
 
             Command::CONNECT if len == 4 * size_of::<f64>() => Command::Connect {
                 position: Position::from_be_bytes(&buf[..24].try_into().unwrap()),
