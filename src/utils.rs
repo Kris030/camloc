@@ -48,7 +48,7 @@ pub(crate) fn get_server(hosts: &mut [Host]) -> Result<&mut Host, usize> {
     for (i, h) in hosts.iter().enumerate() {
         if let HostInfo {
             host_type: HostType::Server,
-            host_state: HostState::Running,
+            host_state: HostState::Running | HostState::Idle,
         } = h.info
         {
             si = match si {
