@@ -133,9 +133,14 @@ impl LocationService {
             }
             drop(r);
 
-            let Ok((len, addr)) = udp_socket.recv_from(&mut buf).await else {
-                continue;
-            };
+            let Ok(recv_result) = tokio::time::timeout(
+				Duration::from_secs(1),
+				udp_socket.recv_from(&mut buf)
+			).await else {
+				continue;
+			};
+            let (len, addr) = recv_result.map_err(|_| "Error while recieving")?;
+
             match buf[..len].try_into() {
                 Ok(Command::StartServer { cube }) => break (cube, addr),
                 Ok(Command::Ping) => {
