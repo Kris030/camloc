@@ -337,24 +337,6 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
         s.write_all(&self.cube.map(u8::to_be))
             .map_err(|_| "Couldn't write cube info")?;
 
-        match &mut self.hosts[host_index].info {
-            HostInfo {
-                host_type: HostType::ConfiglessClient,
-                host_state,
-            } => *host_state = HostState::Running,
-            HostInfo {
-                host_type: HostType::Client { calibrated },
-                host_state,
-            } => {
-                *host_state = HostState::Running;
-                *calibrated = true;
-            }
-            HostInfo {
-                host_type: HostType::Server,
-                ..
-            } => unreachable!(),
-        };
-
         Ok(())
     }
 
