@@ -5,7 +5,7 @@ use camloc_common::{
     cv::{self, display_image},
     get_from_stdin,
     hosts::constants::MAIN_PORT,
-    hosts::{constants::ORGANIZER_STARTER_PORT, ClientStatus, Command, HostStatus, ServerStatus},
+    hosts::{constants::ORGANIZER_STARTER_PORT, Command, HostInfo, HostState, HostType},
     position::{calc_posotion_in_square_distance, get_camera_distance_in_square, Position},
 };
 use network_interface::{Addr, NetworkInterface, NetworkInterfaceConfig};
@@ -19,7 +19,7 @@ use std::{
 };
 
 pub(crate) struct Host {
-    pub status: HostStatus,
+    pub info: HostInfo,
     pub ip: IpAddr,
 }
 
@@ -81,6 +81,19 @@ fn get_setup_type() -> Result<SetupType, &'static str> {
 }
 
 fn main() -> Result<(), String> {
+    let args = {
+        use clap::Parser;
+
+        /// The camloc organizer
+        #[derive(Parser)]
+        struct Args {
+            /// The arcuco ids on the cube (counterclockwise)
+            #[arg(short, long, required = true, num_args = 4)]
+            cube: Vec<u8>,
+        }
+
+        Args::parse()
+    };
     let setup_type = get_setup_type()?;
 
     let own_ip = get_own_ip()?;
@@ -95,6 +108,7 @@ fn main() -> Result<(), String> {
         buffer: &mut [0; 2048],
         server_sock,
         setup_type,
+        cube: args.cube.try_into().unwrap(),
         hosts,
         sock,
     };
@@ -109,24 +123,25 @@ struct Organizer<'a, 'b, const BUFFER_SIZE: usize> {
     hosts: &'b mut Vec<Host>,
     server_sock: TcpListener,
     setup_type: SetupType,
+    cube: [u8; 4],
     sock: UdpSocket,
 }
 
 impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
     fn handle_commands(&mut self) -> Result<(), String> {
-        let Ok(get_from_stdin) = get_from_stdin::<usize>("Enter command: start (0) / stop (1) client: ") else {
+        let Ok(ind) = get_from_stdin::<usize>("Enter command: start (0) / stop (1): ") else {
             return Ok(())
         };
         println!();
-        match get_from_stdin {
+        match ind {
             0 => {
-                if let Err(e) = self.start_client() {
+                if let Err(e) = self.start_host() {
                     println!("Couldn't start client because: {e}");
                 }
             }
 
             1 => {
-                if let Err(e) = self.stop_client() {
+                if let Err(e) = self.stop_host() {
                     println!("Couldn't stop client because: {e}");
                 }
             }
@@ -136,7 +151,7 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
         Ok(())
     }
 
-    fn start_client(&mut self) -> Result<(), String> {
+    fn start_host(&mut self) -> Result<(), String> {
         let server = match utils::get_server(&mut *self.hosts) {
             Ok(s) => s,
             Err(count) => {
@@ -145,14 +160,40 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
             }
         };
         let server_ip = server.ip.to_string();
+        match server.info {
+            HostInfo {
+                host_type: HostType::Server,
+                host_state: HostState::Idle,
+            } => {
+                let s: String =
+                    get_from_stdin("Server isn't running, do you want to start it? (y) ")?;
+                if !matches!(&s[..], "" | "y" | "Y") {
+                    return Ok(());
+                }
+
+                self.sock
+                    .send_to(
+                        &Into::<Vec<u8>>::into(Command::StartServer { cube: self.cube }),
+                        (server.ip, MAIN_PORT),
+                    )
+                    .map_err(|_| "Couldn't start server")?;
+
+                return Ok(());
+            }
+            HostInfo {
+                host_type: HostType::Server,
+                host_state: _,
+            } => (),
+            _ => unreachable!(),
+        }
 
         let options = utils::print_hosts(self.hosts, |s| {
             matches!(
                 s,
-                HostStatus::Client {
-                    status: ClientStatus::Idle,
-                    ..
-                } | HostStatus::ConfiglessClient(ClientStatus::Idle)
+                HostInfo {
+                    host_type: HostType::Client { .. } | HostType::ConfiglessClient,
+                    host_state: HostState::Idle
+                }
             )
         });
         if options.is_empty() {
@@ -179,10 +220,19 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
             }
         };
 
-        let uncalibrated = match self.hosts[host_index].status {
-            HostStatus::Client { calibrated, .. } => !calibrated,
-            HostStatus::ConfiglessClient(_) => false,
-            HostStatus::Server(_) => unreachable!(),
+        let uncalibrated = match self.hosts[host_index].info {
+            HostInfo {
+                host_type: HostType::Client { calibrated },
+                ..
+            } => !calibrated,
+            HostInfo {
+                host_type: HostType::ConfiglessClient,
+                ..
+            } => false,
+            HostInfo {
+                host_type: HostType::Server,
+                ..
+            } => unreachable!(),
         };
 
         let mut uncalibrated = if uncalibrated {
@@ -284,26 +334,38 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
                 .map_err(|_| "Couldn't write calibration")?;
         }
 
-        match &mut self.hosts[host_index].status {
-            HostStatus::ConfiglessClient(status) => *status = ClientStatus::Running,
-            HostStatus::Client { status, calibrated } => {
-                *status = ClientStatus::Running;
+        s.write_all(&self.cube.map(u8::to_be))
+            .map_err(|_| "Couldn't write cube info")?;
+
+        match &mut self.hosts[host_index].info {
+            HostInfo {
+                host_type: HostType::ConfiglessClient,
+                host_state,
+            } => *host_state = HostState::Running,
+            HostInfo {
+                host_type: HostType::Client { calibrated },
+                host_state,
+            } => {
+                *host_state = HostState::Running;
                 *calibrated = true;
             }
-            HostStatus::Server(_) => unreachable!(),
+            HostInfo {
+                host_type: HostType::Server,
+                ..
+            } => unreachable!(),
         };
 
         Ok(())
     }
 
-    fn stop_client(&mut self) -> Result<(), String> {
+    fn stop_host(&mut self) -> Result<(), String> {
         let options = utils::print_hosts(self.hosts, |s| {
             matches!(
                 s,
-                HostStatus::Client {
-                    status: ClientStatus::Running,
-                    ..
-                } | HostStatus::ConfiglessClient(ClientStatus::Running)
+                HostInfo {
+                    host_type: HostType::Client { .. } | HostType::ConfiglessClient,
+                    host_state: HostState::Running,
+                }
             )
         });
 
@@ -378,7 +440,7 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
             };
 
             let ip = addr.ip();
-            let Ok(status) = self.buffer[0].try_into() else {
+            let Ok(info) = self.buffer[0].try_into() else {
                 continue 'loopy;
             };
 
@@ -390,9 +452,9 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
 
             if let Some((h, hit)) = h {
                 *hit = true;
-                h.status = status;
+                h.info = info;
             } else {
-                self.hosts.push(Host { status, ip });
+                self.hosts.push(Host { info, ip });
             }
         }
 
@@ -400,15 +462,29 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
             if *hit {
                 continue;
             }
-            h.status = match h.status {
-                HostStatus::ConfiglessClient(_) => {
-                    HostStatus::ConfiglessClient(ClientStatus::Unreachable)
-                }
-                HostStatus::Client { calibrated, .. } => HostStatus::Client {
-                    status: ClientStatus::Unreachable,
-                    calibrated,
+            h.info = match h.info {
+                HostInfo {
+                    host_type: HostType::ConfiglessClient,
+                    ..
+                } => HostInfo {
+                    host_type: HostType::ConfiglessClient,
+                    host_state: HostState::Unreachable,
                 },
-                HostStatus::Server(_) => HostStatus::Server(ServerStatus::Unreachable),
+                HostInfo {
+                    host_type: HostType::Client { calibrated },
+                    ..
+                } => HostInfo {
+                    host_type: HostType::Client { calibrated },
+                    host_state: HostState::Unreachable,
+                },
+
+                HostInfo {
+                    host_type: HostType::Server,
+                    ..
+                } => HostInfo {
+                    host_type: HostType::Server,
+                    host_state: HostState::Unreachable,
+                },
             };
         }
 
