@@ -118,36 +118,24 @@ pub enum HostState {
 pub enum Command<'a> {
     Ping,
 
-    Connect {
-        position: Position,
-        fov: f64,
-    },
+    Connect { position: Position, fov: f64 },
+    Disconnect,
 
     Start,
-    StartServer {
-        cube: [u8; 4],
-    },
-    StartConfigless {
-        ip: &'a str,
-    },
+    StartServer { cube: [u8; 4] },
+    StartConfigless { ip: &'a str },
     Stop,
 
     RequestImage,
     ImagesDone,
 
-    ValueUpdate {
-        marker_id: u8,
-        value: f64,
-        rotation: (f64, f64, f64),
-    },
-    InfoUpdate {
-        position: Position,
-        fov: f64,
-    },
+    ValueUpdate(ClientData),
+    InfoUpdate { position: Position, fov: f64 },
 }
 impl Command<'_> {
     pub const PING: u8 = 0x0b;
     pub const CONNECT: u8 = 0xcc;
+    pub const DISCONNECT: u8 = 0xdc;
     pub const START: u8 = 0x60;
     pub const START_SERVER: u8 = 0x55;
     pub const START_CONFIGLESS: u8 = 0x6c;
@@ -170,6 +158,8 @@ impl From<Command<'_>> for Vec<u8> {
             ]
             .concat(),
 
+            Command::Disconnect => vec![Command::DISCONNECT],
+
             Command::Start => vec![Command::START],
             Command::StartServer { cube } => vec![
                 Command::START_SERVER.to_be_bytes().as_slice(),
@@ -190,11 +180,11 @@ impl From<Command<'_>> for Vec<u8> {
 
             Command::ImagesDone => vec![Command::IMAGES_DONE],
 
-            Command::ValueUpdate {
+            Command::ValueUpdate(ClientData {
                 marker_id,
-                value,
+                target_x_position: value,
                 rotation,
-            } => [
+            }) => [
                 Command::VALUE_UPDATE.to_be_bytes().as_slice(),
                 marker_id.to_be_bytes().as_slice(),
                 value.to_be_bytes().as_slice(),
@@ -234,28 +224,33 @@ impl<'a> TryFrom<&'a [u8]> for Command<'a> {
             Command::STOP if len == 0 => Command::Stop,
             Command::REQUEST_IMAGE if len == 0 => Command::RequestImage,
             Command::IMAGES_DONE if len == 0 => Command::ImagesDone,
+            Command::DISCONNECT if len == 0 => Command::Disconnect,
 
-            Command::VALUE_UPDATE if len == 1 + 4 * size_of::<f64>() => Command::ValueUpdate {
-                marker_id: u8::from_be(buf[0]),
-                value: f64::from_be_bytes(buf[1..size_of::<f64>() + 1].try_into().map_err(|_| ())?),
-                rotation: (
-                    f64::from_be_bytes(
-                        buf[size_of::<f64>() + 1..2 * size_of::<f64>() + 1]
-                            .try_into()
-                            .map_err(|_| ())?,
+            Command::VALUE_UPDATE if len == 1 + 4 * size_of::<f64>() => {
+                Command::ValueUpdate(ClientData {
+                    marker_id: u8::from_be(buf[0]),
+                    target_x_position: f64::from_be_bytes(
+                        buf[1..size_of::<f64>() + 1].try_into().map_err(|_| ())?,
                     ),
-                    f64::from_be_bytes(
-                        buf[2 * size_of::<f64>() + 1..3 * size_of::<f64>() + 1]
-                            .try_into()
-                            .map_err(|_| ())?,
+                    rotation: (
+                        f64::from_be_bytes(
+                            buf[size_of::<f64>() + 1..2 * size_of::<f64>() + 1]
+                                .try_into()
+                                .map_err(|_| ())?,
+                        ),
+                        f64::from_be_bytes(
+                            buf[2 * size_of::<f64>() + 1..3 * size_of::<f64>() + 1]
+                                .try_into()
+                                .map_err(|_| ())?,
+                        ),
+                        f64::from_be_bytes(
+                            buf[3 * size_of::<f64>() + 1..4 * size_of::<f64>() + 1]
+                                .try_into()
+                                .map_err(|_| ())?,
+                        ),
                     ),
-                    f64::from_be_bytes(
-                        buf[3 * size_of::<f64>() + 1..4 * size_of::<f64>() + 1]
-                            .try_into()
-                            .map_err(|_| ())?,
-                    ),
-                ),
-            },
+                })
+            }
 
             Command::CONNECT if len == 4 * size_of::<f64>() => Command::Connect {
                 position: Position::from_be_bytes(&buf[..24].try_into().unwrap()),
@@ -301,5 +296,21 @@ impl<'a> TryFrom<&'a mut [u8]> for Command<'a> {
     type Error = ();
     fn try_from(buf: &'a mut [u8]) -> Result<Self, Self::Error> {
         (&*buf).try_into()
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct ClientData {
+    pub marker_id: u8,
+    pub target_x_position: f64,
+    pub rotation: (f64, f64, f64),
+}
+impl ClientData {
+    pub fn new(marker_id: u8, target_x_position: f64, rotation: (f64, f64, f64)) -> ClientData {
+        Self {
+            marker_id,
+            target_x_position,
+            rotation,
+        }
     }
 }

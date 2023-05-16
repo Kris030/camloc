@@ -1,3 +1,6 @@
+use std::time::{Duration, Instant};
+
+#[cfg(feature = "cv")]
 pub mod cv;
 pub mod hosts;
 pub mod position;
@@ -66,4 +69,55 @@ pub fn get_from_stdin<T: std::str::FromStr>(prompt: &str) -> Result<T, &'static 
 
     // exclude newline at the end
     l[..l.len() - 1].parse().map_err(|_| "Invalid value")
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct TimeValidatedValue<T> {
+    last_changed: Instant,
+    pub valid_time: Duration,
+    value: T,
+}
+
+impl<T> TimeValidatedValue<T> {
+    pub fn new(value: T, valid_time: Duration) -> Self {
+        Self {
+            last_changed: Instant::now(),
+            valid_time,
+            value,
+        }
+    }
+
+    pub const fn new_with_change(value: T, valid_time: Duration, last_changed: Instant) -> Self {
+        Self {
+            last_changed,
+            valid_time,
+            value,
+        }
+    }
+
+    pub fn get(&self) -> Option<&T> {
+        if self.is_valid() {
+            Some(&self.value)
+        } else {
+            None
+        }
+    }
+
+    pub fn set(&mut self, value: T) {
+        self.last_changed = Instant::now();
+        self.value = value;
+    }
+
+    pub fn set_with_time(&mut self, value: T, last_changed: Instant) {
+        self.last_changed = last_changed;
+        self.value = value;
+    }
+
+    pub fn is_valid(&self) -> bool {
+        self.last_changed.elapsed() <= self.valid_time
+    }
+
+    pub const fn last_changed(&self) -> Instant {
+        self.last_changed
+    }
 }
