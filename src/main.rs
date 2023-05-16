@@ -7,7 +7,7 @@ use camloc_common::{
     cv::FullCameraInfo,
     hosts::{
         constants::{MAIN_PORT, ORGANIZER_STARTER_PORT},
-        Command, HostInfo, HostState, HostType,
+        ClientData, Command, HostInfo, HostState, HostType,
     },
     position::Position,
 };
@@ -108,7 +108,7 @@ fn main() -> Result<(), &'static str> {
         Args::parse()
     };
 
-    // TODO: do da
+    // TODO: ctrl+c handling
     // let (tx, rx) = std::sync::mpsc::channel::<()>();
     // ctrlc::set_handler(move || {
     //     let _ = tx.send(());
@@ -260,7 +260,12 @@ fn inner_loop(
             .copy_to(&mut draw)
             .map_err(|_| "Couldn't copy frame")?;
 
-        let x = detect(frame, Some(&mut draw), &mut has_object, &mut aruco, tracker)?;
+        // TODO: think about this (do we actually want rotation data from each client)
+        let (marker_id, x, rotation) = (
+            0,
+            detect(frame, Some(&mut draw), &mut has_object, &mut aruco, tracker)?,
+            (NAN, NAN, NAN),
+        );
 
         if gui {
             highgui::imshow("videocap", &draw).map_err(|_| "Couldn't show frame")?;
@@ -268,11 +273,11 @@ fn inner_loop(
 
         socket
             .send_to(
-                &Into::<Vec<u8>>::into(Command::ValueUpdate {
-                    marker_id: 0,
-                    value: x,
-                    rotation: (NAN, NAN, NAN),
-                }),
+                &Into::<Vec<u8>>::into(Command::ValueUpdate(ClientData {
+                    target_x_position: x,
+                    marker_id,
+                    rotation,
+                })),
                 config.server,
             )
             .map_err(|_| "Couldn't send value")?;
@@ -282,6 +287,9 @@ fn inner_loop(
         highgui::destroy_all_windows().map_err(|_| "Couldn't close window")?;
     }
 
+    socket
+        .send_to(&[Command::DISCONNECT], config.server)
+        .map_err(|_| "Couldn't send disconnect")?;
     Ok(())
 }
 

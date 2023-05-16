@@ -39,7 +39,7 @@ impl Aruco {
         frame: &mut Mat,
         rect: Option<&mut core::Rect>,
         draw: Option<&mut Mat>,
-    ) -> Result<Option<f64>, &'static str> {
+    ) -> Result<Option<(u8, f64)>, &'static str> {
         self.detector
             .detect_markers(
                 frame,
@@ -49,9 +49,12 @@ impl Aruco {
             )
             .map_err(|_| "Couldn't detect markers")?;
 
-        let Some(index) = self.marker_ids.iter().position(|s| self.cube.contains(&(s as u8))) else {
+        let Some((index, marker_id)) = self.marker_ids.iter()
+            .enumerate()
+            .find(|(_, s)| self.cube.contains(&(*s as u8))) else {
             return Ok(None);
         };
+        let marker_id = marker_id as u8;
 
         let bounding = self
             .corners
@@ -70,7 +73,7 @@ impl Aruco {
             util::rect(draw, brect, Color::Yellow).map_err(|_| "Couldn't draw rectangle")?;
         }
 
-        Ok(Some(util::relative_x(frame, center)))
+        Ok(Some((marker_id, util::relative_x(frame, center))))
     }
 }
 
@@ -83,7 +86,7 @@ pub fn detect(
 ) -> Result<f64, &'static str> {
     let mut final_x = f64::NAN;
     if !*has_object {
-        if let Some(x) = aruco.detect(frame, Some(&mut tracker.rect), draw)? {
+        if let Some((_id, x)) = aruco.detect(frame, Some(&mut tracker.rect), draw)? {
             final_x = x;
             *has_object = true;
             tracker.init(frame)?;
