@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4.2.4", features = ["derive"] }
-# TODO: camloc_common = { git = "https://github.com/Kris030/camloc_common" }
-camloc_common = { path = "../common" }
+# TODO: camloc_common = { git = "https://github.com/Kris030/camloc_common", features = ["cv"] }
+camloc_common = { path = "../common", features = ["cv"] }
 network-interface = "1.0.0"
 opencv = "0.80.0"
