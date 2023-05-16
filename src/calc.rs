@@ -1,4 +1,4 @@
-use camloc_common::position::Position;
+use camloc_common::{hosts::ClientData, position::Position};
 use std::collections::HashMap;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -63,17 +63,20 @@ impl Setup {
         Self { cameras }
     }
 
-    pub fn calculate_position(&self, pxs: &Vec<Option<f64>>) -> Option<Position> {
+    pub fn calculate_position(&self, position_data: PositionData) -> Option<Position> {
         let c = self.cameras.len();
-        debug_assert_eq!(c, pxs.len());
+        debug_assert_eq!(c, position_data.client_data.len());
 
         let mut tangents = vec![None; c];
 
         let mut lines = 0u32;
+        #[allow(clippy::needless_range_loop)]
         for i in 0..c {
-            if let Some(x) = pxs[i] {
+            if let Some(d) = position_data.client_data[i] {
                 tangents[i] = Some(
-                    (self.cameras[i].position.rotation + (self.cameras[i].fov * (0.5 - x))).tan(),
+                    (self.cameras[i].position.rotation
+                        + (self.cameras[i].fov * (0.5 - d.target_x_position)))
+                        .tan(),
                 );
                 lines += 1;
             }
@@ -82,7 +85,7 @@ impl Setup {
             return None;
         }
 
-        let mut s = Position::new(0., 0., f64::NAN);
+        let (mut x, mut y) = (0., 0.);
 
         for i in 0..c {
             for j in (i + 1)..c {
@@ -92,16 +95,93 @@ impl Setup {
                 let c1 = self.cameras[i].position;
                 let c2 = self.cameras[j].position;
 
-                let x = (c1.x * atan - c2.x * btan - c1.y + c2.y) / (atan - btan);
-                let y = atan * (x - c1.x) + c1.y;
-
-                s.x += x;
-                s.y += y;
+                x += (c1.x * atan - c2.x * btan - c1.y + c2.y) / (atan - btan);
+                y += atan * (x - c1.x) + c1.y;
             }
         }
 
-        let points = (lines * (lines - 1) / 2) as f64;
+        let points = ((lines * (lines - 1)) / 2) as f64;
+        let (x, y) = (x / points, y / points);
 
-        Some(Position::new(s.x / points, s.y / points, f64::NAN))
+        let comp_rot = position_data.compass_data;
+        let pos_rot = Setup::get_pos_based_rotation(x, y, &position_data);
+        // TODO: handle clients rot data (?)
+
+        let (mut r, mut rc) = (0., 0u64);
+        #[allow(clippy::manual_flatten)]
+        for rot in [comp_rot, pos_rot] {
+            if let Some(cr) = rot {
+                r += cr;
+                rc += 1;
+            }
+        }
+        let r = r / rc as f64;
+
+        Some(Position::new(x, y, r))
+    }
+
+    fn get_pos_based_rotation(x: f64, y: f64, position_data: &PositionData) -> Option<f64> {
+        let Some(data) = position_data.motion_data else { return None; };
+        let rot_dir = match data.hint {
+            MotionHint::MovingBackwards => -1.,
+            MotionHint::MovingForwards => 1.,
+            MotionHint::Stationary => return Some(data.last_moving_position.rotation),
+        };
+
+        Some(
+            rot_dir
+                * f64::atan2(
+                    x - position_data.last_position.x,
+                    y - position_data.last_position.y,
+                ),
+        )
+    }
+}
+
+#[derive(Clone, Copy)]
+pub enum MotionHint {
+    MovingForwards,
+    MovingBackwards,
+    Stationary,
+}
+
+#[derive(Clone, Copy)]
+pub struct MotionData {
+    pub last_moving_position: Position,
+    pub hint: MotionHint,
+}
+
+impl MotionData {
+    pub fn new(last_moving_position: Position, hint: MotionHint) -> Self {
+        Self {
+            last_moving_position,
+            hint,
+        }
+    }
+}
+
+pub struct PositionData<'a> {
+    pub client_data: &'a [Option<ClientData>],
+    pub motion_data: Option<MotionData>,
+    pub compass_data: Option<f64>,
+    pub last_position: Position,
+    pub cube: [u8; 4],
+}
+
+impl<'a> PositionData<'a> {
+    pub fn new(
+        client_data: &'a [Option<ClientData>],
+        motion_data: Option<MotionData>,
+        compass_data: Option<f64>,
+        last_position: Position,
+        cube: [u8; 4],
+    ) -> Self {
+        Self {
+            cube,
+            client_data,
+            motion_data,
+            compass_data,
+            last_position,
+        }
     }
 }

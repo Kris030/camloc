@@ -1,24 +1,27 @@
 import java.io.DataInputStream;
 import java.util.Collections;
-import java.awt.BasicStroke;
 import java.io.EOFException;
-import java.io.IOException;
 import java.awt.Graphics2D;
 import java.util.ArrayList;
 import java.util.List;
 
-import java.awt.image.BufferedImage;
 import javax.swing.JFrame;
+
+import java.awt.BasicStroke;
 import java.awt.Canvas;
 import java.awt.Color;
-import java.awt.Point;
 import java.awt.Font;
 
 public class TestDisplay {
 
 	public record PlacedCamera(String host, double x, double y, double rot, double fov) {}
+	public record Position(double x, double y, double r) {}
 
-	static List<Point.Double> points = Collections.synchronizedList(new ArrayList<>());
+
+	private static final class MyLock {}
+
+	static Position pos;
+	static MyLock posLock = new MyLock();
 	static List<PlacedCamera> cameras = Collections.synchronizedList(new ArrayList<>());
 
 	public static void main(String[] args) throws Exception {
@@ -29,9 +32,9 @@ public class TestDisplay {
 					var what = bis.readInt();
 					switch (what) {
 						case 0:
-							var p = new Point.Double(bis.readDouble(), bis.readDouble());
-							synchronized (points) {
-								points.add(p);
+							var p = new Position(bis.readDouble(), bis.readDouble(), bis.readDouble());
+							synchronized (posLock) {
+								pos = p;
 							}
 							break;
 
@@ -48,11 +51,16 @@ public class TestDisplay {
 							}
 							break;
 
-						default: throw new RuntimeException("WHAT??? " + what);
+						case 2:
+							var h = bis.readUTF();
+							cameras.removeIf(cf -> cf.host == h);
+							break;
+
+						default: throw new Exception("WHAT??? " + what);
 					}
 				} catch (EOFException e) {
 					break;
-				} catch (IOException e) {
+				} catch (Exception e) {
 					e.printStackTrace();
 					return;
 				}
@@ -74,13 +82,9 @@ public class TestDisplay {
 
 	static int cam_size = 20;
 	static int dot_size = 6;
-	static float col_t = .01f, hue;
 	static double square_size = 3;
 	static double rectPercent = .35;
-	static BufferedImage redraw(int w, int h) {
-		BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_3BYTE_BGR);
-		Graphics2D g = img.createGraphics();
-
+	static void render(Graphics2D g, int w, int h) {
 		int cx = w / 2, cy = h / 2;
 
 		g.setColor(Color.darkGray);
@@ -103,85 +107,62 @@ public class TestDisplay {
 			(int) Math.round(rh)
 		);
 
-		synchronized (points) {
-			for (var p : points) {
-				int xx = cx + (int) Math.round(p.x / square_size * rw);
-				int yy = cy - (int) Math.round(p.y / square_size * rh);
+		synchronized (cameras) {
+			for (PlacedCamera c : cameras) {
+				int xx = cx + (int) Math.round(c.x / square_size * rw);
+				int yy = cy - (int) Math.round(c.y / square_size * rh);
 
-				g.setColor(Color.getHSBColor(hue, 0.5f, 1f));
-				hue += col_t;
-				if (hue >= 360)
-					hue -= 360;
-				g.fillRect(xx - dot_size / 2, yy - dot_size / 2, dot_size, dot_size);
+				g.setColor(Color.green);
+				g.drawRect(xx - cam_size / 2, yy - cam_size / 2, cam_size, cam_size);
+
+				g.drawLine(
+					xx, yy,
+					cx + (int) Math.round((c.x + Math.cos(c.rot + c.fov / 2) * 10) / square_size * rw),
+					cy - (int) Math.round((c.y + Math.sin(c.rot + c.fov / 2) * 10) / square_size * rh)
+				);
+				g.drawLine(
+					xx, yy,
+					cx + (int) Math.round((c.x + Math.cos(c.rot - c.fov / 2) * 10) / square_size * rw),
+					cy - (int) Math.round((c.y + Math.sin(c.rot - c.fov / 2) * 10) / square_size * rh)
+				);
+
+				g.setFont(new Font("sans", Font.PLAIN, 15));
+				g.drawString(c.host, xx + cam_size, yy);
 			}
-			pointsDrawn = points.size();
 		}
 
-		g.dispose();
+		synchronized (posLock) {
+			if (pos != null) {
 
-		return img;
-	}
-
-	static void update(BufferedImage img) {
-		Graphics2D g = img.createGraphics();
-
-		int w = img.getWidth(), h = img.getHeight();
-		int cx = w / 2, cy = h / 2;
-
-		double rw = w * rectPercent;
-		double rh = h * rectPercent;
-
-		synchronized (points) {
-			for (int i = pointsDrawn; i < points.size(); i++) {
-				var p = points.get(i);
-
-				int xx = cx + (int) Math.round(p.x / square_size * rw);
-				int yy = cy - (int) Math.round(p.y / square_size * rh);
-
-				g.setColor(Color.getHSBColor(hue, 0.5f, 1f));
-				hue += col_t;
-				if (hue >= 360)
-					hue -= 360;
-				g.fillRect(xx - dot_size / 2, yy - dot_size / 2, dot_size, dot_size);
-
-			}
-
-			synchronized (cameras) {
-				for (int i = camerasDrawn; i < cameras.size(); i++) {
-					var c = cameras.get(i);
-
-					int xx = cx + (int) Math.round(c.x / square_size * rw);
-					int yy = cy - (int) Math.round(c.y / square_size * rh);
-
-					g.setColor(Color.green);
-					g.drawRect(xx - cam_size / 2, yy - cam_size / 2, cam_size, cam_size);
-
-					g.drawLine(
-						xx, yy,
-						cx + (int) Math.round((c.x + Math.cos(c.rot + c.fov / 2) * 10) / square_size * rw),
-						cy - (int) Math.round((c.y + Math.sin(c.rot + c.fov / 2) * 10) / square_size * rh)
-					);
-					g.drawLine(
-						xx, yy,
-						cx + (int) Math.round((c.x + Math.cos(c.rot - c.fov / 2) * 10) / square_size * rw),
-						cy - (int) Math.round((c.y + Math.sin(c.rot - c.fov / 2) * 10) / square_size * rh)
-					);
-
-					g.setFont(new Font("sans", Font.PLAIN, 15));
-					g.drawString(c.host, xx + cam_size, yy);
+				g.setColor(Color.yellow);
+				for (PlacedCamera c : cameras) {
+					int cam_x = cx + (int) Math.round(c.x / square_size * rw);
+					int cam_y = cy - (int) Math.round(c.y / square_size * rh);
+	
+					int p_x = cx + (int) Math.round(pos.x / square_size * rw);
+					int p_y = cy - (int) Math.round(pos.y / square_size * rh);
+	
+					g.drawLine(cam_x, cam_y, p_x, p_y);
 				}
+
+				int x = cx + (int) Math.round(pos.x / square_size * rw);
+				int y = cy - (int) Math.round(pos.y / square_size * rh);
+
+				g.setColor(Color.red);
+				if (Double.isNaN(pos.r))
+					g.fillOval(x - dot_size / 2, y - dot_size / 2, dot_size, dot_size);
+				else
+					g.fillPolygon(
+						new int[] { x, x + dot_size / 2, x, x - dot_size / 2 },
+						new int[] { y - dot_size / 2, y + dot_size / 2, y, y + dot_size / 2 },
+						4
+					);
 			}
-
-			pointsDrawn = points.size();
 		}
-
-		g.dispose();
 	}
 
 	static int pointsDrawn = 0, camerasDrawn = 0;
 	static void renderLoop(Canvas c) {
-		BufferedImage imgcache = redraw(c.getWidth(), c.getHeight());
-
 		while (true) {
 			var bs = c.getBufferStrategy();
 			if (bs == null) {
@@ -191,41 +172,7 @@ public class TestDisplay {
 
 			var g = (Graphics2D) bs.getDrawGraphics();
 
-			int w = c.getWidth(), h = c.getHeight();
-			int cx = w / 2, cy = h / 2;
-
-			double rw = w * rectPercent;
-			double rh = h * rectPercent;
-
-			if (imgcache.getWidth() != w || imgcache.getHeight() != h)
-				imgcache = redraw(w, h);
-			else
-				update(imgcache);
-
-			g.drawImage(imgcache, 0, 0, null);
-
-			Point.Double lastPoint = null;
-			synchronized (points) {
-				if (!points.isEmpty())
-					lastPoint = points.get(points.size() - 1);
-			}
-
-			if (lastPoint != null) {
-				g.setColor(Color.yellow);
-				for (PlacedCamera cam : cameras) {
-					int cam_x = cx + (int) Math.round(cam.x / square_size * rw);
-					int cam_y = cy - (int) Math.round(cam.y / square_size * rh);
-
-					int p_x = cx + (int) Math.round(lastPoint.x / square_size * rw);
-					int p_y = cy - (int) Math.round(lastPoint.y / square_size * rh);
-
-					g.drawLine(cam_x, cam_y, p_x, p_y);
-				}
-			}
-
-			g.setColor(new Color(120, 180, 0));
-			g.setFont(new Font("Comic", Font.BOLD, 40));
-			g.drawString(Integer.toString(points.size()), w - 150, h - 20);
+			render(g, c.getWidth(), c.getHeight());
 
 			g.dispose();
 			bs.show();

@@ -1,7 +1,7 @@
 use camloc_common::{
-    hosts::{Command, HostInfo, HostState, HostType},
+    hosts::{ClientData, Command, HostInfo, HostState, HostType},
     position::Position,
-    GenerationalValue,
+    TimeValidatedValue,
 };
 use std::{
     f64::NAN,
@@ -20,36 +20,37 @@ use tokio::{
 };
 
 use crate::{
-    calc::{PlacedCamera, Setup},
+    calc::{MotionData, MotionHint, PlacedCamera, PositionData, Setup},
+    compass::Compass,
     extrapolations::Extrapolation,
 };
 
 static DATA_VALIDITY: Duration = Duration::from_millis(500);
 
 struct ClientInfo {
-    last_value: GenerationalValue<(f64, Instant)>,
+    last_data: TimeValidatedValue<ClientData>,
     address: SocketAddr,
 }
 impl ClientInfo {
-    fn new(address: SocketAddr, last_value: GenerationalValue<(f64, Instant)>) -> Self {
-        Self {
-            address,
-            last_value,
-        }
+    fn new(address: SocketAddr, last_data: TimeValidatedValue<ClientData>) -> Self {
+        Self { address, last_data }
     }
 }
 
-type SubscriberFnRet = Pin<Box<dyn Future<Output = ()> + Send>>;
+type RetFuture<T = ()> = Pin<Box<dyn Future<Output = T> + Send>>;
 
 pub enum Subscriber {
-    Connection(fn(SocketAddr, PlacedCamera) -> SubscriberFnRet),
-    Position(fn(TimedPosition) -> SubscriberFnRet),
+    Connection(fn(SocketAddr, PlacedCamera) -> RetFuture),
+    Disconnection(fn(SocketAddr, PlacedCamera) -> RetFuture),
+    Position(fn(TimedPosition) -> RetFuture),
 }
 
 pub struct LocationService {
+    motion_data: RwLock<Option<MotionData>>,
     subscriptions: RwLock<Vec<Subscriber>>,
     extrap: RwLock<Option<Extrapolation>>,
     last_known_pos: RwLock<TimedPosition>,
+    compass: RwLock<Option<Box<dyn Compass + Send + Sync>>>,
     clients: Mutex<Vec<ClientInfo>>,
     start_time: RwLock<Instant>,
     running: RwLock<bool>,
@@ -84,6 +85,7 @@ impl LocationService {
     pub async fn start(
         extrapolation: Option<Extrapolation>,
         port: u16,
+        compass: Option<Box<dyn Compass + Send + Sync>>,
     ) -> Result<LocationServiceHandle, String> {
         let start_time = Instant::now();
 
@@ -103,6 +105,8 @@ impl LocationService {
             subscriptions: vec![].into(),
             start_time: start_time.into(),
             extrap: extrapolation.into(),
+            compass: compass.into(),
+            motion_data: None.into(),
             clients: vec![].into(),
             running: true.into(),
         };
@@ -123,7 +127,6 @@ impl LocationService {
         udp_socket: UdpSocket,
         start_time: Instant,
     ) -> Result<(), String> {
-        let mut min_generation = 0;
         let mut buf = [0u8; 64];
 
         let (cube, organizer) = loop {
@@ -180,7 +183,7 @@ impl LocationService {
 
             match buf[..recv_len].try_into() {
                 // "organizer bonk"
-                Ok(Command::Ping) => {
+                Ok(Command::Ping) if recv_addr == organizer => {
                     udp_socket
                         .send_to(
                             &[HostInfo {
@@ -196,47 +199,51 @@ impl LocationService {
                 }
 
                 // update value
-                Ok(Command::ValueUpdate {
+                Ok(Command::ValueUpdate(ClientData {
                     marker_id,
-                    value,
+                    target_x_position: value,
                     rotation,
-                }) => {
+                })) => {
                     let mut clients = self.clients.lock().await;
-                    let mut ci = None;
-                    let (mut mins, mut mini) = (0, 0);
+                    let mut client_index = None;
+                    let (mut min_t, mut min_index) = (start_time, 0);
 
                     let mut values = vec![None; clients.len()];
                     for (i, c) in clients.iter().enumerate() {
-                        let (value, time) = *c.last_value.get();
-                        values[i] = if recv_time - time <= DATA_VALIDITY {
-                            Some(value)
+                        values[i] = if let Some(data) = c.last_data.get() {
+                            if min_t < c.last_data.last_changed() {
+                                min_t = c.last_data.last_changed();
+                                min_index = i;
+                            }
+                            Some(*data)
                         } else {
                             None
                         };
-
-                        if c.last_value.generation() == min_generation {
-                            mins += 1;
-                            mini = i;
-                        }
                         if c.address == recv_addr {
-                            ci = Some(i);
+                            client_index = Some(i);
                         }
                     }
-                    if let Some(ci) = ci {
-                        clients[ci].last_value.set((value, recv_time));
+                    if let Some(ci) = client_index {
+                        clients[ci]
+                            .last_data
+                            .set_with_time(ClientData::new(marker_id, value, rotation), recv_time);
 
-                        if mins == 1 && mini == ci {
-                            min_generation += 1;
-                            self.update_position(start_time, &values).await?;
+                        if min_index == ci {
+                            self.update_position(start_time, &values[..], cube).await?;
                         }
                     }
                 }
 
                 // connection request
                 Ok(Command::Connect { position, fov }) => {
+                    // TODO: do it better?
                     self.clients.lock().await.push(ClientInfo::new(
                         recv_addr,
-                        GenerationalValue::new_with_generation((NAN, start_time), min_generation),
+                        TimeValidatedValue::new_with_change(
+                            ClientData::new(255, NAN, (NAN, NAN, NAN)),
+                            DATA_VALIDITY,
+                            recv_time,
+                        ),
                     ));
 
                     let cam = PlacedCamera::new(position, fov);
@@ -249,8 +256,14 @@ impl LocationService {
                     }
                 }
 
-                // TODO: update value
+                // TODO: Command::InfoUpdate
                 Ok(Command::InfoUpdate { .. }) => todo!(),
+
+                // TODO: Command::Stop
+                Ok(Command::Stop) if recv_addr == organizer => todo!(),
+
+                // TODO: Command::Disconnect
+                Ok(Command::Disconnect) => todo!(),
 
                 _ => return Err("Recieved invalid number of bytes".to_string()),
             }
@@ -271,9 +284,23 @@ impl LocationService {
     async fn update_position(
         self: &Arc<LocationService>,
         start_time: Instant,
-        pxs: &Vec<Option<f64>>,
+        pxs: &[Option<ClientData>],
+        cube: [u8; 4],
     ) -> Result<(), String> {
-        let Some(position) = self.setup.read().await.calculate_position(pxs) else { return Ok(()); };
+        let motion_data = self.motion_data.read().await;
+
+        let mut compass = self.compass.write().await;
+        let compass_value = if let Some(c) = &mut *compass {
+            Some(c.get_value().map_err(|_| "Couldn't get compass value")?)
+        } else {
+            None
+        };
+        drop(compass);
+
+        let mut last_pos = self.last_known_pos.write().await;
+
+        let data = PositionData::new(pxs, *motion_data, compass_value, last_pos.position, cube);
+        let Some(position) = self.setup.read().await.calculate_position(data) else { return Ok(()); };
 
         let calculated_position = TimedPosition {
             position,
@@ -282,8 +309,7 @@ impl LocationService {
             interpolated: None,
         };
 
-        let mut global_position = self.last_known_pos.write().await;
-        *global_position = calculated_position;
+        *last_pos = calculated_position;
 
         let mut ex = self.extrap.write().await;
         if let Some(ref mut ex) = *ex {
@@ -302,9 +328,19 @@ impl LocationService {
 }
 
 impl LocationServiceHandle {
-    pub async fn subscribe(&self, action: Subscriber) {
-        let mut sw = self.service.subscriptions.write().await;
-        sw.push(action);
+    pub async fn set_motion_hint(&mut self, hint: Option<MotionHint>) {
+        *self.service.motion_data.write().await = if let Some(hint) = hint {
+            Some(MotionData::new(
+                self.service.last_known_pos.read().await.position,
+                hint,
+            ))
+        } else {
+            None
+        };
+    }
+
+    pub async fn subscribe(&mut self, action: Subscriber) {
+        self.service.subscriptions.write().await.push(action);
     }
 
     pub async fn get_position(&self) -> Option<TimedPosition> {
