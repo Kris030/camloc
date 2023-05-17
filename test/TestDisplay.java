@@ -2,11 +2,22 @@ import java.io.DataInputStream;
 import java.util.Collections;
 import java.io.EOFException;
 import java.awt.Graphics2D;
+import java.awt.Point;
+import java.awt.RenderingHints;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseWheelEvent;
+import java.awt.geom.AffineTransform;
+import java.awt.geom.Ellipse2D;
+import java.awt.geom.Line2D;
+import java.awt.geom.Path2D;
+import java.awt.geom.Point2D;
+import java.awt.geom.Rectangle2D;
+import java.awt.image.BufferStrategy;
 import java.util.ArrayList;
 import java.util.List;
 
 import javax.swing.JFrame;
-
 import java.awt.BasicStroke;
 import java.awt.Canvas;
 import java.awt.Color;
@@ -17,29 +28,46 @@ public class TestDisplay {
 	public record PlacedCamera(String host, double x, double y, double rot, double fov) {}
 	public record Position(double x, double y, double r) {}
 
-
 	private static final class MyLock {}
 
 	static Position pos;
 	static MyLock posLock = new MyLock();
 	static List<PlacedCamera> cameras = Collections.synchronizedList(new ArrayList<>());
 
+	static final double FPS = 60;
+	static final double WAIT_MS = 1000 / FPS;
+
+	static final double CAMERA_SIZE = 0.075, DOT_SIZE = 0.05, RECT_SIZE = .35;
+	static final double MOUSE_SENSITIVITY = 0.02, DRAG_SENSITIVITY = 0.001;
+	static final double SQUARE_SIZE_METERS = 3;
+	
+	static double camX, camY, zoomScale = 1;
+	static boolean redraw = true;
+
 	public static void main(String[] args) throws Exception {
+		startDataThread();
+
+		Canvas c = initGUI();
+		renderLoop(c);
+	}
+
+	private static void startDataThread() {
 		new Thread(() -> {
-			var bis = new DataInputStream(System.in);
+			DataInputStream bis = new DataInputStream(System.in);
 			while (true) {
 				try {
-					var what = bis.readInt();
+					int what = bis.readInt();
 					switch (what) {
 						case 0:
-							var p = new Position(bis.readDouble(), bis.readDouble(), bis.readDouble());
+							Position p = new Position(bis.readDouble(), bis.readDouble(), bis.readDouble());
 							synchronized (posLock) {
 								pos = p;
 							}
+							redraw = true;
 							break;
 
 						case 1:
-							var c = new PlacedCamera(
+							PlacedCamera c = new PlacedCamera(
 								bis.readUTF(),
 								bis.readDouble(),
 								bis.readDouble(),
@@ -49,11 +77,13 @@ public class TestDisplay {
 							synchronized (cameras) {
 								cameras.add(c);
 							}
+							redraw = true;
 							break;
 
 						case 2:
-							var h = bis.readUTF();
+							String h = bis.readUTF();
 							cameras.removeIf(cf -> cf.host == h);
+							redraw = true;
 							break;
 
 						default: throw new Exception("WHAT??? " + what);
@@ -66,7 +96,9 @@ public class TestDisplay {
 				}
 			}
 		}).start();
+	}
 
+	private static Canvas initGUI() {
 		JFrame f = new JFrame("camloc");
 		f.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 		f.setSize(800, 800);
@@ -77,57 +109,134 @@ public class TestDisplay {
 
 		f.setVisible(true);
 
-		renderLoop(c);
+		MouseAdapter m = new MouseAdapter() {
+			boolean leftClicking = false;
+			Point lastDrag;
+
+			public void mouseWheelMoved(MouseWheelEvent e) {
+				Point2D.Double p = toWorldSpace(e.getPoint(), c.getWidth(), c.getHeight());
+
+				double rot = e.getPreciseWheelRotation();
+				double sign = Math.signum(rot);
+				
+				camX += p.x * MOUSE_SENSITIVITY * sign;
+				camY += p.y * MOUSE_SENSITIVITY * sign;
+				
+				zoomScale -= rot * MOUSE_SENSITIVITY;
+
+				redraw = true;
+			}
+
+			public void mouseDragged(MouseEvent e) {
+				if (!leftClicking)
+					return;
+
+				Point p = e.getPoint();
+				
+				camX += (p.x - lastDrag.x) * zoomScale * DRAG_SENSITIVITY;
+				camY -= (p.y - lastDrag.y) * zoomScale * DRAG_SENSITIVITY;
+
+				lastDrag = p;
+				redraw = true;
+			}
+			public void mousePressed(MouseEvent e) {
+				if (e.getButton() == MouseEvent.BUTTON1) {
+					lastDrag = e.getPoint();
+					leftClicking = true;
+					redraw = true;
+				}
+			}
+			public void mouseReleased(MouseEvent e) {
+				if (e.getButton() == MouseEvent.BUTTON1) {
+					leftClicking = false;
+					lastDrag = null;
+					redraw = true;
+				}
+			}
+		};
+
+		c.addMouseMotionListener(m);
+		c.addMouseWheelListener(m);
+		c.addMouseListener(m);
+
+		return c;
 	}
 
-	static int cam_size = 20;
-	static int dot_size = 6;
-	static double square_size = 3;
-	static double rectPercent = .35;
-	static void render(Graphics2D g, int w, int h) {
-		int cx = w / 2, cy = h / 2;
+	static Point2D.Double toWorldSpace(java.awt.Point p, int w, int h) {
+		return new Point2D.Double(
+			(p.x + w / 2d) / w - 1,
+			(h - p.y + h / 2d) / h - 1
+		);
+	}
+	
+	static void render(Graphics2D g, int canvasW, int canvasH) {
+		setRenderHints(g);
 
 		g.setColor(Color.darkGray);
-		g.fillRect(0, 0, w, h);
+		g.fillRect(0, 0, canvasW, canvasH);
+
+		// flip y axis
+		g.scale(1, -1);
+
+		// recenter
+		g.translate(canvasW / 2d, canvasH / 2d - canvasH);
+
+		// make screen 1x1
+		double sreenScale = Math.min(canvasW, canvasH);
+		g.scale(sreenScale, sreenScale);
+
+		// move to camera position
+		g.translate(camX, camY);
+
+		// apply zoom
+		g.scale(zoomScale, zoomScale);
 
 		g.setColor(Color.yellow);
-		g.setStroke(new BasicStroke(3));
-		g.drawLine(0, cy, w, cy);
-		g.drawLine(cx, 0, cx, h);
+		g.setStroke(new BasicStroke(0.005f));
+		g.draw(new Line2D.Double(1, 0, -1, 0));
+		g.draw(new Line2D.Double(0, 1, 0, -1));
 
-		double rw = w * rectPercent;
-		double rh = h * rectPercent;
+		double ax = -0.5 * RECT_SIZE;
+		double ay = -0.5 * RECT_SIZE;
 
-		int ax = cx - (int) Math.round(0.5 * rw);
-		int ay = cy - (int) Math.round(0.5 * rh);
-
-		g.drawRect(
+		g.draw(new Rectangle2D.Double(
 			ax, ay,
-			(int) Math.round(rw),
-			(int) Math.round(rh)
-		);
+			RECT_SIZE,
+			RECT_SIZE
+		));
+
+		double scale = 1 / SQUARE_SIZE_METERS * RECT_SIZE;
+		g.scale(scale, scale);
 
 		synchronized (cameras) {
 			for (PlacedCamera c : cameras) {
-				int xx = cx + (int) Math.round(c.x / square_size * rw);
-				int yy = cy - (int) Math.round(c.y / square_size * rh);
-
 				g.setColor(Color.green);
-				g.drawRect(xx - cam_size / 2, yy - cam_size / 2, cam_size, cam_size);
+				g.draw(new Rectangle2D.Double(
+					c.x - CAMERA_SIZE / 2,
+					c.y - CAMERA_SIZE / 2,
+					CAMERA_SIZE,
+					CAMERA_SIZE
+				));
 
-				g.drawLine(
-					xx, yy,
-					cx + (int) Math.round((c.x + Math.cos(c.rot + c.fov / 2) * 10) / square_size * rw),
-					cy - (int) Math.round((c.y + Math.sin(c.rot + c.fov / 2) * 10) / square_size * rh)
-				);
-				g.drawLine(
-					xx, yy,
-					cx + (int) Math.round((c.x + Math.cos(c.rot - c.fov / 2) * 10) / square_size * rw),
-					cy - (int) Math.round((c.y + Math.sin(c.rot - c.fov / 2) * 10) / square_size * rh)
-				);
+				g.draw(new Line2D.Double(
+					c.x, c.y,
+					(c.x + Math.cos(c.rot + c.fov / 2) * 10),
+					(c.y + Math.sin(c.rot + c.fov / 2) * 10)
+				));
+				g.draw(new Line2D.Double(
+					c.x, c.y,
+					(c.x + Math.cos(c.rot - c.fov / 2) * 10),
+					(c.y + Math.sin(c.rot - c.fov / 2) * 10)
+				));
 
-				g.setFont(new Font("sans", Font.PLAIN, 15));
-				g.drawString(c.host, xx + cam_size, yy);
+				g.setFont(new Font("sans", Font.PLAIN, 1));
+				
+				AffineTransform at = g.getTransform();
+				g.translate(c.x + CAMERA_SIZE, c.y);
+				g.scale(0.05, 0.05);
+				g.drawString(c.host, 0, 0);
+
+				g.setTransform(at);
 			}
 		}
 
@@ -135,53 +244,69 @@ public class TestDisplay {
 			if (pos != null) {
 
 				g.setColor(Color.yellow);
-				for (PlacedCamera c : cameras) {
-					int cam_x = cx + (int) Math.round(c.x / square_size * rw);
-					int cam_y = cy - (int) Math.round(c.y / square_size * rh);
-	
-					int p_x = cx + (int) Math.round(pos.x / square_size * rw);
-					int p_y = cy - (int) Math.round(pos.y / square_size * rh);
-	
-					g.drawLine(cam_x, cam_y, p_x, p_y);
-				}
+				for (PlacedCamera c : cameras)
+					g.draw(new Line2D.Double(
+						c.x, c.y,
+						pos.x, pos.y
+					));
 
-				int x = cx + (int) Math.round(pos.x / square_size * rw);
-				int y = cy - (int) Math.round(pos.y / square_size * rh);
+				double x = pos.x;
+				double y = pos.y;
 
 				g.setColor(Color.red);
 				if (Double.isNaN(pos.r))
-					g.fillOval(x - dot_size / 2, y - dot_size / 2, dot_size, dot_size);
-				else
-					g.fillPolygon(
-						new int[] { x, x + dot_size / 2, x, x - dot_size / 2 },
-						new int[] { y - dot_size / 2, y + dot_size / 2, y, y + dot_size / 2 },
-						4
-					);
+					g.fill(new Ellipse2D.Double(x - DOT_SIZE / 2, y - DOT_SIZE / 2, DOT_SIZE, DOT_SIZE));
+				else {
+					Path2D.Double p = new Path2D.Double();
+					
+					p.moveTo(x, y + DOT_SIZE / 2);
+					p.moveTo(x + DOT_SIZE / 2, y - DOT_SIZE / 2);
+					p.moveTo(x, y);
+					p.moveTo(x - DOT_SIZE / 2, y - DOT_SIZE / 2);
+					p.closePath();
+
+					g.fill(p);
+				}
 			}
 		}
 	}
 
-	static int pointsDrawn = 0, camerasDrawn = 0;
 	static void renderLoop(Canvas c) {
 		while (true) {
-			var bs = c.getBufferStrategy();
+			long start = System.nanoTime();
+
+			BufferStrategy bs = c.getBufferStrategy();
 			if (bs == null) {
 				c.createBufferStrategy(2);
 				continue;
 			}
 
-			var g = (Graphics2D) bs.getDrawGraphics();
+			Graphics2D g = (Graphics2D) bs.getDrawGraphics();
 
-			render(g, c.getWidth(), c.getHeight());
+			if (redraw) {
+				redraw = false;
+				render(g, c.getWidth(), c.getHeight());
+			}
 
 			g.dispose();
 			bs.show();
+			
+			long realWait = Math.round(WAIT_MS - (System.nanoTime() - start) / 1_000_000d);
 
-			try {
-				Thread.sleep(30);
-			} catch (InterruptedException e) {
-				e.printStackTrace();
+			if (realWait > 0) {
+				try {
+					Thread.sleep(realWait);
+				} catch (InterruptedException e) {
+					e.printStackTrace();
+				}
 			}
 		}
+	}
+
+	private static void setRenderHints(Graphics2D g) {
+		g.setRenderingHint(RenderingHints.KEY_ALPHA_INTERPOLATION, RenderingHints.VALUE_ALPHA_INTERPOLATION_QUALITY);
+        g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
 	}
 }
