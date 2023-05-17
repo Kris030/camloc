@@ -115,7 +115,11 @@ impl Setup {
                 rc += 1;
             }
         }
-        let r = r / rc as f64;
+        let r = if rc == 0 {
+            f64::NAN
+        } else {
+            r / rc as f64
+        };
 
         Some(Position::new(x, y, r))
     }
