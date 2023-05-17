@@ -37,8 +37,9 @@ public class TestDisplay {
 	static final double FPS = 60;
 	static final double WAIT_MS = 1000 / FPS;
 
-	static final double ZOOM_SENSITIVITY = 0.02, DRAG_SENSITIVITY = 0.001;
+	static final double ZOOM_SENSITIVITY = 0.02, FAST_ZOOM_MODIFIER = 5;
 	static final double CAMERA_SIZE = 0.075, DOT_SIZE = 0.05;
+	static final double DRAG_SENSITIVITY = 0.001;
 	static final double IRL_SCALING = .5;
 
 	static double camX, camY, zoomScale = 1;
@@ -116,17 +117,17 @@ public class TestDisplay {
 			public void mouseWheelMoved(MouseWheelEvent e) {
 				Point2D.Double p = toWorldSpace(e.getPoint(), c.getWidth(), c.getHeight());
 
-				double rot = e.getPreciseWheelRotation();
-				double sign = Math.signum(rot);
+				double rot = e.getWheelRotation();
+				double sign = -Math.signum(rot);
 				
-				double modifier = ZOOM_SENSITIVITY;
+				double zoom = ZOOM_SENSITIVITY * sign;
 				if ((e.getModifiersEx() & MouseEvent.ALT_DOWN_MASK) == MouseEvent.ALT_DOWN_MASK)
-					modifier *= 5;
+					zoom *= FAST_ZOOM_MODIFIER;
 
-				camX += p.x * modifier * sign;
-				camY += p.y * modifier * sign;
+				camX += p.x * zoom;
+				camY += p.y * zoom;
 				
-				zoomScale -= rot * modifier;
+				zoomScale += zoom;
 
 				redraw = true;
 			}
