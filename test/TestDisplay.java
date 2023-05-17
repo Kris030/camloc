@@ -37,10 +37,10 @@ public class TestDisplay {
 	static final double FPS = 60;
 	static final double WAIT_MS = 1000 / FPS;
 
-	static final double CAMERA_SIZE = 0.075, DOT_SIZE = 0.05, RECT_SIZE = .35;
-	static final double MOUSE_SENSITIVITY = 0.02, DRAG_SENSITIVITY = 0.001;
-	static final double SQUARE_SIZE_METERS = 3;
-	
+	static final double ZOOM_SENSITIVITY = 0.02, DRAG_SENSITIVITY = 0.001;
+	static final double CAMERA_SIZE = 0.075, DOT_SIZE = 0.05;
+	static final double IRL_SCALING = .5;
+
 	static double camX, camY, zoomScale = 1;
 	static boolean redraw = true;
 
@@ -119,10 +119,14 @@ public class TestDisplay {
 				double rot = e.getPreciseWheelRotation();
 				double sign = Math.signum(rot);
 				
-				camX += p.x * MOUSE_SENSITIVITY * sign;
-				camY += p.y * MOUSE_SENSITIVITY * sign;
+				double modifier = ZOOM_SENSITIVITY;
+				if ((e.getModifiersEx() & MouseEvent.ALT_DOWN_MASK) == MouseEvent.ALT_DOWN_MASK)
+					modifier *= 5;
+
+				camX += p.x * modifier * sign;
+				camY += p.y * modifier * sign;
 				
-				zoomScale -= rot * MOUSE_SENSITIVITY;
+				zoomScale -= rot * modifier;
 
 				redraw = true;
 			}
@@ -188,25 +192,13 @@ public class TestDisplay {
 		// move to camera position
 		g.translate(camX, camY);
 
-		// apply zoom
-		g.scale(zoomScale, zoomScale);
-
-		g.setColor(Color.yellow);
-		g.setStroke(new BasicStroke(0.005f));
-		g.draw(new Line2D.Double(1, 0, -1, 0));
-		g.draw(new Line2D.Double(0, 1, 0, -1));
-
-		double ax = -0.5 * RECT_SIZE;
-		double ay = -0.5 * RECT_SIZE;
-
-		g.draw(new Rectangle2D.Double(
-			ax, ay,
-			RECT_SIZE,
-			RECT_SIZE
-		));
-
-		double scale = 1 / SQUARE_SIZE_METERS * RECT_SIZE;
+		// apply zoom + scale to real life
+		double scale = zoomScale * IRL_SCALING;
 		g.scale(scale, scale);
+		
+		g.setStroke(new BasicStroke(0.005f));
+		g.setColor(Color.gray);
+		g.fill(new Ellipse2D.Double(-DOT_SIZE / 2, -DOT_SIZE / 2, DOT_SIZE, DOT_SIZE));
 
 		synchronized (cameras) {
 			for (PlacedCamera c : cameras) {
@@ -229,11 +221,12 @@ public class TestDisplay {
 					(c.y + Math.sin(c.rot - c.fov / 2) * 10)
 				));
 
+				g.setColor(Color.white);
 				g.setFont(new Font("sans", Font.PLAIN, 1));
 				
 				AffineTransform at = g.getTransform();
 				g.translate(c.x + CAMERA_SIZE, c.y);
-				g.scale(0.05, 0.05);
+				g.scale(0.05, -0.05);
 				g.drawString(c.host, 0, 0);
 
 				g.setTransform(at);
