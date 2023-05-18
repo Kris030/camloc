@@ -1,5 +1,4 @@
 use camloc_common::{hosts::ClientData, position::Position};
-use std::collections::HashMap;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub struct PlacedCamera {
@@ -19,48 +18,8 @@ pub struct Setup {
 }
 
 impl Setup {
-    pub fn new_empty() -> Self {
+    pub fn new() -> Self {
         Self { cameras: vec![] }
-    }
-
-    pub fn new_freehand(cameras: Vec<PlacedCamera>) -> Self {
-        Self { cameras }
-    }
-
-    pub fn new_square(square_size: f64, fovs: Vec<f64>) -> Self {
-        let c = fovs.len();
-        debug_assert!(
-            (2..=4).contains(&c),
-            "A square setup may only have 2 or 4 cameras"
-        );
-
-        let mut hmap: HashMap<u64, f64> = HashMap::new();
-
-        let mut ind = 0;
-        let cameras = fovs
-            .into_iter()
-            .map(|fov| {
-                let bits = fov.to_bits();
-                let d = match hmap.get(&bits) {
-                    Some(v) => *v,
-                    None => {
-                        let v = camloc_common::position::get_camera_distance_in_square(
-                            square_size,
-                            fov,
-                        );
-                        hmap.insert(fov.to_bits(), v);
-                        v
-                    }
-                };
-
-                let pos = camloc_common::position::calc_posotion_in_square_distance(ind, d);
-                ind += 1;
-
-                PlacedCamera::new(pos, fov)
-            })
-            .collect();
-
-        Self { cameras }
     }
 
     pub fn calculate_position(&self, position_data: PositionData) -> Option<Position> {
@@ -115,11 +74,7 @@ impl Setup {
                 rc += 1;
             }
         }
-        let r = if rc == 0 {
-            f64::NAN
-        } else {
-            r / rc as f64
-        };
+        let r = if rc == 0 { f64::NAN } else { r / rc as f64 };
 
         Some(Position::new(x, y, r))
     }
@@ -139,6 +94,12 @@ impl Setup {
                     y - position_data.last_position.y,
                 ),
         )
+    }
+}
+
+impl Default for Setup {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

@@ -101,7 +101,7 @@ impl LocationService {
                 interpolated: None,
             }
             .into(),
-            setup: Setup::new_freehand(vec![]).into(),
+            setup: Setup::new().into(),
             subscriptions: vec![].into(),
             start_time: start_time.into(),
             extrap: extrapolation.into(),

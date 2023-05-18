@@ -1,5 +1,8 @@
 #!/bin/bash
-cargo build --release -q --example main --features=serial-compass &&
+
+cargo_opts="--release --example main --features=serial-compass"
+
+cargo b $cargo_opts &&
 javac -d dump test/TestDisplay.java &&
 exec 3> >(java -cp dump TestDisplay) &&
-./target/release/examples/main 2>&3
+cargo r $cargo_opts -q 2>&3
