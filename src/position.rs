@@ -41,7 +41,7 @@ impl std::fmt::Display for Position {
     }
 }
 
-static CPOS: [(f64, f64); 4] = [(-1., 0.), (0., -1.), (1., 0.), (0., -1.)];
+static CPOS: [(f64, f64); 4] = [(-1., 0.), (0., -1.), (1., 0.), (0., 1.)];
 
 pub fn calc_posotion_in_square_fov(side_length: f64, index: usize, fov: f64) -> Position {
     debug_assert!(index < 4, "A square setup may only have 2 or 4 cameras");
