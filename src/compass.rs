@@ -1,45 +1,56 @@
-pub trait Compass {
-    fn get_value(&mut self) -> std::io::Result<f64>;
+#[macro_export]
+macro_rules! no_compass {
+    () => {
+        if true {
+            None
+        } else {
+            async fn dummy() -> Option<f64> {
+                None
+            }
+            Some(dummy)
+        }
+    };
 }
+pub use no_compass;
 
 #[cfg(feature = "serial-compass")]
-pub struct SerialCompass<P: tokio_serial::SerialPort> {
-    /// The offset of the compass compared to the server coordninate system
-    compass_offset: f64,
-    serial_port: P,
-}
+pub mod serial {
+    use std::{sync::Arc, time::Duration};
+    use tokio::sync::RwLock;
+    use tokio_serial::SerialStream;
 
-#[cfg(feature = "serial-compass")]
-impl<P: tokio_serial::SerialPort> SerialCompass<P> {
-    pub const START_SIGNAL: &[u8] = &[0x60];
-    pub const STOP_SIGNAL: &[u8] = &[0xcc];
-
-    pub fn start(
-        mut serial_port: P,
-        compass_offset: f64,
-    ) -> Result<SerialCompass<P>, std::io::Error> {
-        serial_port.write_all(Self::START_SIGNAL)?;
-        Ok(Self {
-            serial_port,
-            compass_offset,
-        })
+    pub struct SerialCompass {
+        last_value: Arc<RwLock<Option<f64>>>,
     }
-}
 
-#[cfg(feature = "serial-compass")]
-impl<P: tokio_serial::SerialPort> Compass for SerialCompass<P> {
-    fn get_value(&mut self) -> std::io::Result<f64> {
-        let mut angle = [0; std::mem::size_of::<f64>()];
-        self.serial_port.read_exact(&mut angle)?;
+    impl SerialCompass {
+        pub fn start(
+            mut serial_port: SerialStream,
+            compass_offset: f64,
+        ) -> Result<SerialCompass, std::io::Error> {
+            let last_value = Arc::new(RwLock::new(None));
+            let lval2 = last_value.clone();
 
-        // microbit is little endian
-        Ok(f64::from_le_bytes(angle) - self.compass_offset)
-    }
-}
+            tokio::spawn(async move {
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                let mut i = tokio::time::interval(Duration::from_millis(10));
+                loop {
+                    i.tick().await;
+                    serial_port.write_all(&[b'$']).await.unwrap();
 
-#[cfg(feature = "serial-compass")]
-impl<P: tokio_serial::SerialPort> Drop for SerialCompass<P> {
-    fn drop(&mut self) {
-        self.serial_port.write_all(Self::STOP_SIGNAL).unwrap();
+                    let v = serial_port.read_u8().await;
+                    let v = v.ok().map(|v| (v as f64).to_radians() - compass_offset);
+
+                    let mut lv = lval2.write().await;
+                    *lv = v;
+                }
+            });
+            Ok(Self { last_value })
+        }
+
+        pub const DATA_SIGNAL: [u8; 1] = [b'$'];
+        pub async fn get_value(&self) -> Option<f64> {
+            *self.last_value.read().await
+        }
     }
 }

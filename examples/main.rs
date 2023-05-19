@@ -1,7 +1,7 @@
 use camloc_common::get_from_stdin;
 use camloc_server::{
     calc::PlacedCamera,
-    compass::{Compass, SerialCompass},
+    compass::serial::SerialCompass,
     extrapolations::{Extrapolation, LinearExtrapolation},
     service::{LocationService, Subscriber, TimedPosition},
 };
@@ -10,7 +10,7 @@ use tokio::{
     io::{stderr, AsyncWriteExt},
     sync::watch,
 };
-use tokio_serial::SerialPortType;
+use tokio_serial::{SerialPortBuilderExt, SerialPortType};
 
 fn main() {
     if let Err(e) = run() {
@@ -36,7 +36,7 @@ async fn send_camera(address: String, camera: PlacedCamera) -> tokio::io::Result
     Ok(())
 }
 
-fn get_compass() -> Result<Option<Box<dyn Compass + Send + Sync>>, &'static str> {
+fn get_compass() -> Result<Option<SerialCompass>, &'static str> {
     let yes: String = get_from_stdin("Do you want to use a microbit compass? (y/N) ")?;
     if !matches!(&yes[..], "y" | "Y") {
         return Ok(None);
@@ -48,6 +48,11 @@ fn get_compass() -> Result<Option<Box<dyn Compass + Send + Sync>>, &'static str>
         println!("  Couldn't get available serial devices");
         return Ok(None);
     };
+    if devices.is_empty() {
+        println!("No serial devices available");
+        return Ok(None);
+    }
+
     println!("  Available serial devices:");
 
     for (i, d) in devices.iter().enumerate() {
@@ -76,15 +81,15 @@ fn get_compass() -> Result<Option<Box<dyn Compass + Send + Sync>>, &'static str>
     }
 
     let d = &devices[get_from_stdin::<usize>("  Enter index: ")?];
-    let baud_rate = get_from_stdin("  Enter baud rate (9600): ")?;
-    let offset = get_from_stdin("  Enter compass offset (vs server coordinates): ")?;
+    let baud_rate = get_from_stdin("  Enter baud rate (9600hz): ")?;
+    let offset = get_from_stdin("  Enter compass offset (degrees): ")?;
 
     let p = tokio_serial::new(&d.port_name, baud_rate)
-        .open_native()
+        .open_native_async()
         .map(|p| SerialCompass::start(p, offset));
 
     if let Ok(Ok(p)) = p {
-        Ok(Some(Box::new(p)))
+        Ok(Some(p))
     } else {
         Err("Couldn't open serial port")
     }
@@ -92,14 +97,16 @@ fn get_compass() -> Result<Option<Box<dyn Compass + Send + Sync>>, &'static str>
 
 #[tokio::main]
 async fn run() -> Result<(), String> {
-    let compass = get_compass()?;
-
+    let compass = Box::leak(get_compass()?.into());
     let mut location_service = LocationService::start(
-        Some(Extrapolation::new::<LinearExtrapolation>(
+        Some(Extrapolation::<LinearExtrapolation>::new(
             Duration::from_millis(500),
         )),
         camloc_common::hosts::constants::MAIN_PORT,
-        compass,
+        compass
+            .as_mut()
+            .map(|compass| || async { compass.get_value().await }),
+        // no_compass!(),
     )
     .await?;
 

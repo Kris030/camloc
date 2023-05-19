@@ -8,15 +8,15 @@ pub trait Extrapolator: Send + Sync {
     fn extrapolate(&self, time: Instant) -> Option<Position>;
 }
 
-pub struct Extrapolation {
-    pub extrapolator: Box<dyn Extrapolator>,
+pub struct Extrapolation<E: Extrapolator> {
+    pub extrapolator: E,
     pub invalidate_after: Duration,
 }
 
-impl Extrapolation {
-    pub fn new<E: Extrapolator + Default + 'static>(invalidate_after: Duration) -> Self {
+impl<E: Extrapolator + Default> Extrapolation<E> {
+    pub fn new(invalidate_after: Duration) -> Self {
         Extrapolation {
-            extrapolator: Box::<E>::default(),
+            extrapolator: E::default(),
             invalidate_after,
         }
     }
@@ -62,5 +62,19 @@ impl Extrapolator for LinearExtrapolation {
 
     fn get_last_datapoint(&self) -> Option<TimedPosition> {
         self.data[self.p]
+    }
+}
+
+impl Extrapolator for () {
+    fn add_datapoint(&mut self, _: TimedPosition) {
+        unreachable!("This implementation only exists to not have to provide a concrete type when not using extrapolation")
+    }
+
+    fn get_last_datapoint(&self) -> Option<TimedPosition> {
+        unreachable!("This implementation only exists to not have to provide a concrete type when not using extrapolation")
+    }
+
+    fn extrapolate(&self, _: Instant) -> Option<Position> {
+        unreachable!("This implementation only exists to not have to provide a concrete type when not using extrapolation")
     }
 }

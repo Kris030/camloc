@@ -21,8 +21,7 @@ use tokio::{
 
 use crate::{
     calc::{MotionData, MotionHint, PlacedCamera, PositionData, Setup},
-    compass::Compass,
-    extrapolations::Extrapolation,
+    extrapolations::{Extrapolation, Extrapolator},
 };
 
 static DATA_VALIDITY: Duration = Duration::from_millis(500);
@@ -45,24 +44,34 @@ pub enum Subscriber {
     Position(fn(TimedPosition) -> RetFuture),
 }
 
-pub struct LocationService {
+pub struct LocationService<
+    E: Send + Extrapolator,
+    C: FnMut() -> F,
+    F: Future<Output = Option<f64>> + Send,
+> {
     motion_data: RwLock<Option<MotionData>>,
     subscriptions: RwLock<Vec<Subscriber>>,
-    extrap: RwLock<Option<Extrapolation>>,
+    extrap: RwLock<Option<Extrapolation<E>>>,
     last_known_pos: RwLock<TimedPosition>,
-    compass: RwLock<Option<Box<dyn Compass + Send + Sync>>>,
+    compass: RwLock<Option<C>>,
     clients: Mutex<Vec<ClientInfo>>,
     start_time: RwLock<Instant>,
     running: RwLock<bool>,
     setup: RwLock<Setup>,
 }
 
-pub struct LocationServiceHandle {
+pub struct LocationServiceHandle<
+    E: Send + Extrapolator,
+    C: FnMut() -> F,
+    F: Future<Output = Option<f64>> + Send,
+> {
     handle: Option<JoinHandle<Result<(), String>>>,
-    service: Arc<LocationService>,
+    service: Arc<LocationService<E, C, F>>,
 }
 
-impl Drop for LocationServiceHandle {
+impl<E: Send + Extrapolator, C: FnMut() -> F, F: Future<Output = Option<f64>> + Send> Drop
+    for LocationServiceHandle<E, C, F>
+{
     fn drop(&mut self) {
         let handle = self.handle.take().expect("Handle should always be Some");
 
@@ -81,12 +90,17 @@ impl Drop for LocationServiceHandle {
     }
 }
 
-impl LocationService {
+impl<
+        E: Send + Sync + Extrapolator + 'static,
+        C: 'static + Send + Sync + FnMut() -> F,
+        F: 'static + Future<Output = Option<f64>> + Send + Sync,
+    > LocationService<E, C, F>
+{
     pub async fn start(
-        extrapolation: Option<Extrapolation>,
+        extrapolation: Option<Extrapolation<E>>,
         port: u16,
-        compass: Option<Box<dyn Compass + Send + Sync>>,
-    ) -> Result<LocationServiceHandle, String> {
+        compass: Option<C>,
+    ) -> Result<LocationServiceHandle<E, C, F>, String> {
         let start_time = Instant::now();
 
         let udp_socket = UdpSocket::bind(("0.0.0.0", port))
@@ -114,7 +128,7 @@ impl LocationService {
         let arc = Arc::new(instance);
         let ret = arc.clone();
 
-        let handle = spawn(Self::run(arc, udp_socket, start_time));
+        let handle = spawn(arc.run(udp_socket, start_time));
 
         Ok(LocationServiceHandle {
             handle: Some(handle),
@@ -123,7 +137,7 @@ impl LocationService {
     }
 
     async fn run(
-        self: Arc<LocationService>,
+        self: Arc<LocationService<E, C, F>>,
         udp_socket: UdpSocket,
         start_time: Instant,
     ) -> Result<(), String> {
@@ -282,7 +296,7 @@ impl LocationService {
     }
 
     async fn update_position(
-        self: &Arc<LocationService>,
+        self: &Arc<LocationService<E, C, F>>,
         start_time: Instant,
         pxs: &[Option<ClientData>],
         cube: [u8; 4],
@@ -290,8 +304,8 @@ impl LocationService {
         let motion_data = self.motion_data.read().await;
 
         let mut compass = self.compass.write().await;
-        let compass_value = if let Some(c) = &mut *compass {
-            Some(c.get_value().map_err(|_| "Couldn't get compass value")?)
+        let compass_value = if let Some(compass) = &mut *compass {
+            compass().await
         } else {
             None
         };
@@ -327,7 +341,9 @@ impl LocationService {
     }
 }
 
-impl LocationServiceHandle {
+impl<E: Send + Extrapolator, C: FnMut() -> F, F: Future<Output = Option<f64>> + Send>
+    LocationServiceHandle<E, C, F>
+{
     pub async fn set_motion_hint(&mut self, hint: Option<MotionHint>) {
         *self.service.motion_data.write().await = if let Some(hint) = hint {
             Some(MotionData::new(
