@@ -81,7 +81,7 @@ fn get_compass() -> Result<Option<SerialCompass>, &'static str> {
     }
 
     let d = &devices[get_from_stdin::<usize>("  Enter index: ")?];
-    let baud_rate = get_from_stdin("  Enter baud rate (9600hz): ")?;
+    let baud_rate = get_from_stdin("  Enter baud rate (115200hz): ").unwrap_or(115200);
     let offset = get_from_stdin("  Enter compass offset (degrees): ")?;
 
     let p = tokio_serial::new(&d.port_name, baud_rate)
