@@ -252,11 +252,11 @@ public class TestDisplay {
 					g.fill(new Ellipse2D.Double(-DOT_SIZE / 2, -DOT_SIZE / 2, DOT_SIZE, DOT_SIZE));
 				else {
 					Path2D.Double p = new Path2D.Double();
-
-					p.moveTo(0, DOT_SIZE / 2);
-					p.moveTo(DOT_SIZE / 2, -DOT_SIZE / 2);
+					
 					p.moveTo(0, 0);
-					p.moveTo(-DOT_SIZE / 2, -DOT_SIZE / 2);
+					p.lineTo(DOT_SIZE / 2, -DOT_SIZE / 2);
+					p.lineTo(0, DOT_SIZE / 2);
+					p.lineTo(-DOT_SIZE / 2, -DOT_SIZE / 2);
 					p.closePath();
 
 					g.rotate(pos.r);
