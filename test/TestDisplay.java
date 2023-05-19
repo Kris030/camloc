@@ -244,21 +244,22 @@ public class TestDisplay {
 						pos.x, pos.y
 					));
 
-				double x = pos.x;
-				double y = pos.y;
+				double x = pos.x, y = pos.y;
 
 				g.setColor(Color.red);
+				g.translate(x, y);
 				if (Double.isNaN(pos.r))
-					g.fill(new Ellipse2D.Double(x - DOT_SIZE / 2, y - DOT_SIZE / 2, DOT_SIZE, DOT_SIZE));
+					g.fill(new Ellipse2D.Double(-DOT_SIZE / 2, -DOT_SIZE / 2, DOT_SIZE, DOT_SIZE));
 				else {
 					Path2D.Double p = new Path2D.Double();
-					
-					p.moveTo(x, y + DOT_SIZE / 2);
-					p.moveTo(x + DOT_SIZE / 2, y - DOT_SIZE / 2);
-					p.moveTo(x, y);
-					p.moveTo(x - DOT_SIZE / 2, y - DOT_SIZE / 2);
+
+					p.moveTo(0, DOT_SIZE / 2);
+					p.moveTo(DOT_SIZE / 2, -DOT_SIZE / 2);
+					p.moveTo(0, 0);
+					p.moveTo(-DOT_SIZE / 2, -DOT_SIZE / 2);
 					p.closePath();
 
+					g.rotate(pos.r);
 					g.fill(p);
 				}
 			}
