@@ -1,4 +1,7 @@
-use std::time::{Duration, Instant};
+use std::{
+    fmt::Display,
+    time::{Duration, Instant},
+};
 
 #[cfg(feature = "cv")]
 pub mod cv;
@@ -69,6 +72,45 @@ pub fn get_from_stdin<T: std::str::FromStr>(prompt: &str) -> Result<T, &'static 
 
     // exclude newline at the end
     l[..l.len() - 1].parse().map_err(|_| "Invalid value")
+}
+
+pub fn yes_no_choice(prompt: &str, default: bool) -> bool {
+    let default_text = if default { "Y/n" } else { "y/N" };
+    let prompt = &format!("{prompt} ({default_text}) ");
+
+    let Ok(answer) = get_from_stdin::<String>(prompt) else {
+        return default;
+    };
+
+    matches!(&answer.to_lowercase()[..], "y" | "yes")
+}
+
+pub fn choice<T: Display>(
+    listed: impl Iterator<Item = (T, bool)>,
+    choice_prompt: Option<&str>,
+    default_choice: Option<usize>,
+) -> Result<usize, &'static str> {
+    let mut choices = 0;
+    for (c, is_choice) in listed {
+        if is_choice {
+            print!("{choices:<3}");
+            choices += 1;
+        } else {
+            print!("   ");
+        }
+
+        println!("{c}");
+    }
+
+    get_from_stdin(choice_prompt.unwrap_or("Enter choice: "))
+        .and_then(|v| {
+            if v >= choices {
+                Err("No such choice")
+            } else {
+                Ok(v)
+            }
+        })
+        .or(default_choice.ok_or("No valid default was provided"))
 }
 
 #[derive(Debug, Clone, Copy)]

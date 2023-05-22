@@ -183,14 +183,10 @@ impl From<Command<'_>> for Vec<u8> {
             Command::ValueUpdate(ClientData {
                 marker_id,
                 target_x_position: value,
-                rotation,
             }) => [
                 Command::VALUE_UPDATE.to_be_bytes().as_slice(),
                 marker_id.to_be_bytes().as_slice(),
                 value.to_be_bytes().as_slice(),
-                rotation.0.to_be_bytes().as_slice(),
-                rotation.1.to_be_bytes().as_slice(),
-                rotation.2.to_be_bytes().as_slice(),
             ]
             .concat(),
 
@@ -231,23 +227,6 @@ impl<'a> TryFrom<&'a [u8]> for Command<'a> {
                     marker_id: u8::from_be(buf[0]),
                     target_x_position: f64::from_be_bytes(
                         buf[1..size_of::<f64>() + 1].try_into().map_err(|_| ())?,
-                    ),
-                    rotation: (
-                        f64::from_be_bytes(
-                            buf[size_of::<f64>() + 1..2 * size_of::<f64>() + 1]
-                                .try_into()
-                                .map_err(|_| ())?,
-                        ),
-                        f64::from_be_bytes(
-                            buf[2 * size_of::<f64>() + 1..3 * size_of::<f64>() + 1]
-                                .try_into()
-                                .map_err(|_| ())?,
-                        ),
-                        f64::from_be_bytes(
-                            buf[3 * size_of::<f64>() + 1..4 * size_of::<f64>() + 1]
-                                .try_into()
-                                .map_err(|_| ())?,
-                        ),
                     ),
                 })
             }
@@ -301,16 +280,14 @@ impl<'a> TryFrom<&'a mut [u8]> for Command<'a> {
 
 #[derive(Clone, Copy)]
 pub struct ClientData {
-    pub marker_id: u8,
     pub target_x_position: f64,
-    pub rotation: (f64, f64, f64),
+    pub marker_id: u8,
 }
 impl ClientData {
-    pub fn new(marker_id: u8, target_x_position: f64, rotation: (f64, f64, f64)) -> ClientData {
+    pub fn new(marker_id: u8, target_x_position: f64) -> ClientData {
         Self {
             marker_id,
             target_x_position,
-            rotation,
         }
     }
 }
