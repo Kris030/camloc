@@ -1,8 +1,7 @@
 mod aruco;
-mod track;
 mod util;
 
-use aruco::Aruco;
+use crate::aruco::Aruco;
 use camloc_common::{
     cv::FullCameraInfo,
     hosts::{
@@ -17,15 +16,11 @@ use opencv::{
     videoio::{self, VideoCapture},
 };
 use std::{
-    f64::NAN,
     fs::File,
     io::{Read, Write},
     net::{IpAddr, SocketAddr, TcpStream, UdpSocket},
     time::Duration,
 };
-use track::Tracking;
-
-use crate::aruco::detect;
 
 const BUF_SIZE: usize = 2048;
 
@@ -126,7 +121,6 @@ fn main() -> Result<(), &'static str> {
     };
 
     let mut frame = Mat::default();
-    let mut tracker = Tracking::new()?;
 
     let socket =
         UdpSocket::bind(("0.0.0.0", MAIN_PORT)).map_err(|_| "Couldn't create UDP socket")?;
@@ -184,29 +178,19 @@ fn main() -> Result<(), &'static str> {
             .send_to(&config.to_connection_request().unwrap(), config.server)
             .map_err(|_| "Couldn't connect to server")?;
 
-        inner_loop(
-            &socket,
-            &mut cam,
-            &mut tracker,
-            config,
-            &mut buf,
-            &mut frame,
-            args.gui,
-        )?;
+        inner_loop(&socket, &mut cam, config, &mut buf, &mut frame, args.gui)?;
     }
 }
 
 fn inner_loop(
     socket: &UdpSocket,
     cam: &mut VideoCapture,
-    tracker: &mut Tracking,
     config: Config,
     buf: &mut [u8],
     mut frame: &mut Mat,
     gui: bool,
 ) -> Result<(), &'static str> {
     let mut draw = Mat::default();
-    let mut has_object = false;
     let mut aruco = Aruco::new(config.cube)?;
 
     if gui {
@@ -261,26 +245,23 @@ fn inner_loop(
             .map_err(|_| "Couldn't copy frame")?;
 
         // TODO: think about this (do we actually want rotation data from each client)
-        let (marker_id, x, rotation) = (
-            0,
-            detect(frame, Some(&mut draw), &mut has_object, &mut aruco, tracker)?,
-            (NAN, NAN, NAN),
-        );
+        if let Some((marker_id, x)) = aruco.detect(frame, Some(&mut draw))? {
+            socket
+                .send_to(
+                    &Into::<Vec<u8>>::into(Command::ValueUpdate(ClientData {
+                        target_x_position: x,
+                        marker_id,
+                    })),
+                    config.server,
+                )
+                .map_err(|_| "Couldn't send value")?;
+        } else {
+            todo!()
+        }
 
         if gui {
             highgui::imshow("videocap", &draw).map_err(|_| "Couldn't show frame")?;
         }
-
-        socket
-            .send_to(
-                &Into::<Vec<u8>>::into(Command::ValueUpdate(ClientData {
-                    target_x_position: x,
-                    marker_id,
-                    rotation,
-                })),
-                config.server,
-            )
-            .map_err(|_| "Couldn't send value")?;
     }
 
     if gui {

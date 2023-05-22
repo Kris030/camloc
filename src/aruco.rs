@@ -1,9 +1,15 @@
-use crate::track::Tracking;
-use crate::util::{self, Color};
-use camloc_common::cv::get_aruco_dictionary;
-use opencv::{core, objdetect, prelude::*, types};
+use opencv::{
+    core::{self, Ptr, Rect},
+    objdetect,
+    prelude::*,
+    tracking, types,
+    video::Tracker as CVTracker,
+};
 
-pub struct Aruco {
+use crate::util::{self, Center, Color};
+use camloc_common::cv::get_aruco_dictionary;
+
+pub struct Detector {
     detector: objdetect::ArucoDetector,
     corners: types::VectorOfVectorOfPoint2f,
     rejected: types::VectorOfVectorOfPoint2f,
@@ -11,7 +17,7 @@ pub struct Aruco {
     cube: [u8; 4],
 }
 
-impl Aruco {
+impl Detector {
     /// setup new aruco detector
     /// generate targets with: https://chev.me/arucogen/
     pub fn new(cube: [u8; 4]) -> Result<Self, &'static str> {
@@ -77,25 +83,92 @@ impl Aruco {
     }
 }
 
-pub fn detect(
-    frame: &mut Mat,
-    draw: Option<&mut Mat>,
-    has_object: &mut bool,
-    aruco: &mut Aruco,
-    tracker: &mut Tracking,
-) -> Result<f64, &'static str> {
-    let mut final_x = f64::NAN;
-    if !*has_object {
-        if let Some((_id, x)) = aruco.detect(frame, Some(&mut tracker.rect), draw)? {
-            final_x = x;
-            *has_object = true;
-            tracker.init(frame)?;
-        }
-    } else if let Some(x) = tracker.track(frame, draw)? {
-        final_x = x;
-    } else {
-        *has_object = false;
+pub struct Tracker {
+    tracker: Ptr<dyn tracking::TrackerKCF>,
+    /// bounding box of the tracked area
+    pub rect: Rect,
+}
+
+impl Tracker {
+    pub fn new() -> Result<Self, &'static str> {
+        Ok(Self {
+            tracker: Self::reinit(&Mat::default(), Rect::default())?,
+            rect: Rect::default(),
+        })
     }
 
-    Ok(final_x)
+    /// creates a new `TrackerKCF` struct (because calling `init` on the same instance causes segfaults for whatever reason)
+    fn reinit(frame: &Mat, rect: Rect) -> Result<Ptr<dyn tracking::TrackerKCF>, &'static str> {
+        let mut tracker = <dyn tracking::TrackerKCF>::create(
+            tracking::TrackerKCF_Params::default()
+                .map_err(|_| "Couldn't get default tracker params")?,
+        )
+        .map_err(|_| "Couldn't create tracker")?;
+        if !rect.empty() {
+            tracker
+                .init(frame, rect)
+                .map_err(|_| "Couldn't init tracker")?
+        }
+        Ok(tracker)
+    }
+
+    pub fn init(&mut self, frame: &Mat) -> Result<(), &'static str> {
+        self.tracker = Self::reinit(frame, self.rect).map_err(|_| "Couldn't init tracker")?;
+        Ok(())
+    }
+
+    /// returns None if lost object
+    pub fn track(
+        &mut self,
+        frame: &Mat,
+        draw: Option<&mut Mat>,
+    ) -> Result<Option<f64>, &'static str> {
+        match self.tracker.update(&frame, &mut self.rect) {
+            Ok(true) => {
+                if let Some(draw) = draw {
+                    util::rect(draw, self.rect, Color::Cyan).map_err(|_| "Couldn't draw rect")?;
+                    util::draw_x(draw, self.rect.center(), Color::Red)
+                        .map_err(|_| "Couldn't draw center")?;
+                }
+                Ok(Some(util::relative_x(frame, self.rect.center())))
+            }
+            Ok(false) => Ok(None),
+            Err(_) => Err("Couldn't update tracker"),
+        }
+    }
+}
+
+pub struct Aruco {
+    tracked_object: Option<(u8, f64)>,
+    detector: Detector,
+    tracker: Tracker,
+}
+
+impl Aruco {
+    pub fn new(cube: [u8; 4]) -> Result<Aruco, &'static str> {
+        Ok(Self {
+            detector: Detector::new(cube)?,
+            tracker: Tracker::new()?,
+            tracked_object: None,
+        })
+    }
+
+    pub fn detect(
+        &mut self,
+        frame: &mut Mat,
+        draw: Option<&mut Mat>,
+    ) -> Result<Option<(u8, f64)>, &'static str> {
+        self.tracked_object = if let Some((id, _)) = self.tracked_object {
+            self.tracker.track(frame, draw)?.map(|x| (id, x))
+        } else {
+            let res = self
+                .detector
+                .detect(frame, Some(&mut self.tracker.rect), draw)?;
+            if res.is_some() {
+                self.tracker.init(frame)?;
+            }
+            res
+        };
+        Ok(self.tracked_object)
+    }
 }
