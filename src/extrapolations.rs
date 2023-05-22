@@ -2,6 +2,14 @@ use crate::service::TimedPosition;
 use camloc_common::{position::Position, Lerp};
 use std::time::{Duration, Instant};
 
+#[macro_export]
+macro_rules! no_extrapolation {
+    () => {
+        Option::<Extrapolation<()>>::None
+    };
+}
+pub use no_extrapolation;
+
 pub trait Extrapolator: Send + Sync {
     fn add_datapoint(&mut self, position: TimedPosition);
     fn get_last_datapoint(&self) -> Option<TimedPosition>;

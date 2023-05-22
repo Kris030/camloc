@@ -1,4 +1,4 @@
-use camloc_common::get_from_stdin;
+use camloc_common::{get_from_stdin, yes_no_choice};
 use camloc_server::{
     calc::PlacedCamera,
     compass::serial::SerialCompass,
@@ -14,11 +14,10 @@ use tokio_serial::{SerialPortBuilderExt, SerialPortType};
 
 fn main() {
     if let Err(e) = run() {
-        println!("[ERROR]: {e}");
+        println!("Exiting with error: {e}");
     } else {
-        println!("No errors");
+        println!("Exiting test...");
     }
-    println!("Exiting test...");
 }
 
 async fn send_camera(address: String, camera: PlacedCamera) -> tokio::io::Result<()> {
@@ -37,8 +36,7 @@ async fn send_camera(address: String, camera: PlacedCamera) -> tokio::io::Result
 }
 
 fn get_compass() -> Result<Option<SerialCompass>, &'static str> {
-    let yes: String = get_from_stdin("Do you want to use a microbit compass? (y/N) ")?;
-    if !matches!(&yes[..], "y" | "Y") {
+    if !yes_no_choice("Do you want to use a microbit compass?", false) {
         return Ok(None);
     }
 
@@ -49,7 +47,7 @@ fn get_compass() -> Result<Option<SerialCompass>, &'static str> {
         return Ok(None);
     };
     if devices.is_empty() {
-        println!("No serial devices available");
+        println!("  No serial devices available");
         return Ok(None);
     }
 
@@ -82,11 +80,11 @@ fn get_compass() -> Result<Option<SerialCompass>, &'static str> {
 
     let d = &devices[get_from_stdin::<usize>("  Enter index: ")?];
     let baud_rate = get_from_stdin("  Enter baud rate (115200hz): ").unwrap_or(115200);
-    let offset = get_from_stdin("  Enter compass offset (degrees): ")?;
+    let offset = get_from_stdin("  Enter compass offset in degrees (0 deg): ").unwrap_or(0u8);
 
     let p = tokio_serial::new(&d.port_name, baud_rate)
         .open_native_async()
-        .map(|p| SerialCompass::start(p, offset));
+        .map(|p| SerialCompass::start(p, offset as f64));
 
     if let Ok(Ok(p)) = p {
         Ok(Some(p))
@@ -102,6 +100,7 @@ async fn run() -> Result<(), String> {
         Some(Extrapolation::<LinearExtrapolation>::new(
             Duration::from_millis(500),
         )),
+        // no_extrapolation!(),
         camloc_common::hosts::constants::MAIN_PORT,
         compass
             .as_mut()
@@ -165,7 +164,7 @@ async fn run() -> Result<(), String> {
     })
     .map_err(|_| "Couldn't setup ctrl+c handler")?;
 
-    if true {
+    if yes_no_choice("Subscription or query mode?", true) {
         location_service
             .subscribe(Subscriber::Position(write_to_stderr_binary))
             .await;
@@ -175,6 +174,7 @@ async fn run() -> Result<(), String> {
             .map_err(|_| "Something failed in the ctrl+c channel")?;
         location_service.stop().await;
     } else {
+        let mut interval = tokio::time::interval(Duration::from_millis(50));
         loop {
             if let Some(p) = location_service.get_position().await {
                 write_to_stderr_binary(p).await;
@@ -188,6 +188,8 @@ async fn run() -> Result<(), String> {
             {
                 break;
             }
+
+            interval.tick().await;
         }
     }
 

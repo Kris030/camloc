@@ -216,7 +216,6 @@ impl<
                 Ok(Command::ValueUpdate(ClientData {
                     marker_id,
                     target_x_position: value,
-                    rotation,
                 })) => {
                     let mut clients = self.clients.lock().await;
                     let mut client_index = None;
@@ -240,7 +239,7 @@ impl<
                     if let Some(ci) = client_index {
                         clients[ci]
                             .last_data
-                            .set_with_time(ClientData::new(marker_id, value, rotation), recv_time);
+                            .set_with_time(ClientData::new(marker_id, value), recv_time);
 
                         if min_index == ci {
                             self.update_position(start_time, &values[..], cube).await?;
@@ -254,7 +253,7 @@ impl<
                     self.clients.lock().await.push(ClientInfo::new(
                         recv_addr,
                         TimeValidatedValue::new_with_change(
-                            ClientData::new(255, NAN, (NAN, NAN, NAN)),
+                            ClientData::new(255, NAN),
                             DATA_VALIDITY,
                             recv_time,
                         ),
