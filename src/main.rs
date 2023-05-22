@@ -2,11 +2,13 @@ mod scanning;
 mod utils;
 
 use camloc_common::{
+    choice,
     cv::{self, display_image},
     get_from_stdin,
     hosts::constants::MAIN_PORT,
     hosts::{constants::ORGANIZER_STARTER_PORT, Command, HostInfo, HostState, HostType},
     position::{calc_posotion_in_square_distance, get_camera_distance_in_square, Position},
+    yes_no_choice,
 };
 use network_interface::{Addr, NetworkInterface, NetworkInterfaceConfig};
 use opencv::{core, imgcodecs, prelude::*};
@@ -21,6 +23,23 @@ use std::{
 pub(crate) struct Host {
     pub info: HostInfo,
     pub ip: IpAddr,
+}
+impl std::fmt::Display for Host {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let ip = &self.ip;
+        match &self.info.host_type {
+            HostType::Client { calibrated } => {
+                write!(f, "CLIENT {ip}")?;
+                if *calibrated {
+                    write!(f, " CALIBRATED")?;
+                }
+            }
+            HostType::ConfiglessClient => write!(f, "PHONE {ip}")?,
+            HostType::Server => write!(f, "SERVER {ip}")?,
+        }
+        write!(f, " {:?}", self.info.host_state)?;
+        Ok(())
+    }
 }
 
 fn get_own_ip() -> Result<Addr, String> {
@@ -129,29 +148,6 @@ struct Organizer<'a, 'b, const BUFFER_SIZE: usize> {
 
 impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
     fn handle_commands(&mut self) -> Result<(), String> {
-        let Ok(ind) = get_from_stdin::<usize>("Enter command: start (0) / stop (1): ") else {
-            return Ok(())
-        };
-        println!();
-        match ind {
-            0 => {
-                if let Err(e) = self.start_host() {
-                    println!("Couldn't start client because: {e}");
-                }
-            }
-
-            1 => {
-                if let Err(e) = self.stop_host() {
-                    println!("Couldn't stop client because: {e}");
-                }
-            }
-            _ => (),
-        }
-        println!();
-        Ok(())
-    }
-
-    fn start_host(&mut self) -> Result<(), String> {
         let server = match utils::get_server(&mut *self.hosts) {
             Ok(s) => s,
             Err(count) => {
@@ -159,15 +155,12 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
                 return Ok(());
             }
         };
-        let server_ip = server.ip.to_string();
         match server.info {
             HostInfo {
                 host_type: HostType::Server,
                 host_state: HostState::Idle,
             } => {
-                let s: String =
-                    get_from_stdin("Server isn't running, do you want to start it? (y) ")?;
-                if !matches!(&s[..], "" | "y" | "Y") {
+                if !yes_no_choice("Server isn't running, do you want to start it?", true) {
                     return Ok(());
                 }
 
@@ -187,22 +180,55 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
             _ => unreachable!(),
         }
 
-        let options = utils::print_hosts(self.hosts, |s| {
-            matches!(
-                s,
-                HostInfo {
-                    host_type: HostType::Client { .. } | HostType::ConfiglessClient,
-                    host_state: HostState::Idle
+        let Ok(ind) = get_from_stdin::<usize>("Enter command: start (0) / stop (1): ") else {
+            return Ok(())
+        };
+        println!();
+        match ind {
+            0 => {
+                let server_ip = server.ip.to_string();
+                if let Err(e) = self.start_host(&server_ip) {
+                    println!("Couldn't start client because: {e}");
                 }
-            )
-        });
+            }
+
+            1 => {
+                if let Err(e) = self.stop_host() {
+                    println!("Couldn't stop client because: {e}");
+                }
+            }
+            _ => (),
+        }
+        println!();
+        Ok(())
+    }
+
+    fn start_host(&mut self, server: &str) -> Result<(), String> {
+        let options: Vec<(&Host, bool)> = self
+            .hosts
+            .iter()
+            .map(|h| {
+                (h, {
+                    matches!(
+                        h.info,
+                        HostInfo {
+                            host_type: HostType::Client { .. } | HostType::ConfiglessClient,
+                            host_state: HostState::Idle
+                        }
+                    )
+                })
+            })
+            .collect();
         if options.is_empty() {
             println!("No clients found");
             return Ok(());
         }
 
-        let selected: usize = get_from_stdin("\nSelect client to start: ")?;
-        let host_index = *options.get(selected).ok_or("No such index")?;
+        let host_index = choice(
+            options.into_iter(),
+            Some("\nSelect client to start: "),
+            None,
+        )?;
         let addr = ((self.hosts[host_index]).ip, MAIN_PORT);
 
         self.sock
@@ -294,7 +320,7 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
         s.write_all(&[Command::IMAGES_DONE])
             .map_err(|_| "Couldn't send images done")?;
 
-        let ip_bytes = server_ip.as_bytes();
+        let ip_bytes = server.as_bytes();
         let ip_len = ip_bytes.len() as u16;
 
         let (pos, calib) = if let Some((board, images)) = &uncalibrated {
@@ -341,18 +367,19 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
     }
 
     fn stop_host(&mut self) -> Result<(), String> {
-        let options = utils::print_hosts(self.hosts, |s| {
-            matches!(
-                s,
-                HostInfo {
-                    host_type: HostType::Client { .. } | HostType::ConfiglessClient,
-                    host_state: HostState::Running,
-                }
-            )
+        let options = self.hosts.iter().map(|s| {
+            (s, {
+                matches!(
+                    s.info,
+                    HostInfo {
+                        host_type: HostType::Client { .. } | HostType::ConfiglessClient,
+                        host_state: HostState::Running,
+                    }
+                )
+            })
         });
 
-        let selected: usize = get_from_stdin("\nSelect client to start: ")?;
-        let host = options[selected];
+        let host = choice(options, Some("\nSelect client to start: "), None)?;
 
         let addr = (self.hosts[host].ip, MAIN_PORT);
         self.sock
