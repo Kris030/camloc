@@ -78,11 +78,10 @@ pub fn yes_no_choice(prompt: &str, default: bool) -> bool {
     let default_text = if default { "Y/n" } else { "y/N" };
     let prompt = &format!("{prompt} ({default_text}) ");
 
-    let Ok(answer) = get_from_stdin::<String>(prompt) else {
-        return default;
-    };
-
-    matches!(&answer.to_lowercase()[..], "y" | "yes")
+    match get_from_stdin::<String>(prompt) {
+        Ok(answer) if !answer.is_empty() => matches!(&answer.to_lowercase()[..], "y" | "yes"),
+        _ => default,
+    }
 }
 
 pub fn choice<T: Display>(
