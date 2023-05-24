@@ -45,6 +45,7 @@ impl Setup {
         }
 
         let (mut x, mut y) = (0., 0.);
+        let points = ((lines * (lines - 1)) / 2) as f64;
 
         for i in 0..c {
             for j in (i + 1)..c {
@@ -54,13 +55,13 @@ impl Setup {
                 let c1 = self.cameras[i].position;
                 let c2 = self.cameras[j].position;
 
-                x += (c1.x * atan - c2.x * btan - c1.y + c2.y) / (atan - btan);
-                y += atan * (x - c1.x) + c1.y;
+                let px = (c1.x * atan - c2.x * btan - c1.y + c2.y) / (atan - btan);
+                let py = atan * (x - c1.x) + c1.y;
+
+                x += px / points;
+                y += py / points;
             }
         }
-
-        let points = ((lines * (lines - 1)) / 2) as f64;
-        let (x, y) = (x / points, y / points);
 
         let comp_rot = position_data.compass_data;
         let pos_rot = Setup::get_pos_based_rotation(x, y, &position_data);
