@@ -143,7 +143,7 @@ impl<
     ) -> Result<(), String> {
         let mut buf = [0u8; 64];
 
-        let (cube, organizer) = loop {
+        let (cube, _organizer) = loop {
             let r = self.running.read().await;
             if !*r {
                 return Ok(());
@@ -197,7 +197,7 @@ impl<
 
             match buf[..recv_len].try_into() {
                 // "organizer bonk"
-                Ok(Command::Ping) if recv_addr == organizer => {
+                Ok(Command::Ping) => {
                     udp_socket
                         .send_to(
                             &[HostInfo {
@@ -255,7 +255,7 @@ impl<
                         TimeValidatedValue::new_with_change(
                             ClientData::new(255, NAN),
                             DATA_VALIDITY,
-                            recv_time,
+                            recv_time - DATA_VALIDITY,
                         ),
                     ));
 
@@ -273,12 +273,12 @@ impl<
                 Ok(Command::InfoUpdate { .. }) => todo!(),
 
                 // TODO: Command::Stop
-                Ok(Command::Stop) if recv_addr == organizer => todo!(),
+                Ok(Command::Stop) => todo!(),
 
                 // TODO: Command::Disconnect
                 Ok(Command::Disconnect) => todo!(),
 
-                _ => return Err("Recieved invalid number of bytes".to_string()),
+                _ => (),
             }
         }
 
