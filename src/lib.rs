@@ -84,16 +84,17 @@ pub fn yes_no_choice(prompt: &str, default: bool) -> bool {
     }
 }
 
+// TODO: indexes xd
 pub fn choice<T: Display>(
     listed: impl Iterator<Item = (T, bool)>,
     choice_prompt: Option<&str>,
     default_choice: Option<usize>,
 ) -> Result<usize, &'static str> {
-    let mut choices = 0;
-    for (c, is_choice) in listed {
+    let mut mapping = vec![];
+    for (i, (c, is_choice)) in listed.enumerate() {
         if is_choice {
-            print!("{choices:<3}");
-            choices += 1;
+            print!("{:<3}", mapping.len());
+            mapping.push(i);
         } else {
             print!("   ");
         }
@@ -101,12 +102,12 @@ pub fn choice<T: Display>(
         println!("{c}");
     }
 
-    get_from_stdin(choice_prompt.unwrap_or("Enter choice: "))
+    get_from_stdin::<usize>(choice_prompt.unwrap_or("Enter choice: "))
         .and_then(|v| {
-            if v >= choices {
+            if v >= mapping.len() {
                 Err("No such choice")
             } else {
-                Ok(v)
+                Ok(mapping[v])
             }
         })
         .or(default_choice.ok_or("No valid default was provided"))
