@@ -214,15 +214,16 @@ impl<'a> TryFrom<&'a [u8]> for Command<'a> {
         let len = len - 1;
         let buf = &buf[1..];
 
+        // TODO: check sizes
         Ok(match cmd {
-            Command::PING if len == 0 => Command::Ping,
-            Command::START if len == 0 => Command::Start,
-            Command::STOP if len == 0 => Command::Stop,
-            Command::REQUEST_IMAGE if len == 0 => Command::RequestImage,
-            Command::IMAGES_DONE if len == 0 => Command::ImagesDone,
-            Command::DISCONNECT if len == 0 => Command::Disconnect,
+            Command::PING => Command::Ping,
+            Command::START => Command::Start,
+            Command::STOP => Command::Stop,
+            Command::REQUEST_IMAGE => Command::RequestImage,
+            Command::IMAGES_DONE => Command::ImagesDone,
+            Command::DISCONNECT => Command::Disconnect,
 
-            Command::VALUE_UPDATE if len == 1 + 4 * size_of::<f64>() => {
+            Command::VALUE_UPDATE => {
                 Command::ValueUpdate(ClientData {
                     marker_id: u8::from_be(buf[0]),
                     target_x_position: f64::from_be_bytes(
@@ -231,7 +232,7 @@ impl<'a> TryFrom<&'a [u8]> for Command<'a> {
                 })
             }
 
-            Command::CONNECT if len == 4 * size_of::<f64>() => Command::Connect {
+            Command::CONNECT => Command::Connect {
                 position: Position::from_be_bytes(&buf[..24].try_into().unwrap()),
                 fov: f64::from_be_bytes(
                     buf[3 * size_of::<f64>()..4 * size_of::<f64>()]
@@ -240,7 +241,7 @@ impl<'a> TryFrom<&'a [u8]> for Command<'a> {
                 ),
             },
 
-            Command::INFO_UPDATE if len == 4 * size_of::<f64>() => Command::InfoUpdate {
+            Command::INFO_UPDATE => Command::InfoUpdate {
                 position: Position::from_be_bytes(&buf[..24].try_into().unwrap()),
                 fov: f64::from_be_bytes(
                     buf[3 * size_of::<f64>()..4 * size_of::<f64>()]
@@ -249,7 +250,7 @@ impl<'a> TryFrom<&'a [u8]> for Command<'a> {
                 ),
             },
 
-            Command::START_CONFIGLESS if len >= size_of::<u16>() => {
+            Command::START_CONFIGLESS => {
                 let ip_len = u16::from_be_bytes(buf[..size_of::<u16>()].try_into().map_err(|_| ())?)
                     as usize;
                 if len != size_of::<u16>() + ip_len {
@@ -262,7 +263,7 @@ impl<'a> TryFrom<&'a [u8]> for Command<'a> {
                 }
             }
 
-            Command::START_SERVER if len == 4 => Command::StartServer {
+            Command::START_SERVER => Command::StartServer {
                 cube: [buf[0], buf[1], buf[2], buf[3]],
             },
 
