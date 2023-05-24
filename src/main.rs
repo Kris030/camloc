@@ -6,7 +6,7 @@ use camloc_common::{
     cv::FullCameraInfo,
     hosts::{
         constants::{MAIN_PORT, ORGANIZER_STARTER_PORT},
-        ClientData, Command, HostInfo, HostState, HostType,
+        Command, HostInfo, HostState, HostType,
     },
     position::Position,
 };
@@ -207,8 +207,8 @@ fn inner_loop(
             .set_read_timeout(Some(Duration::from_millis(1)))
             .map_err(|_| "Couldn't set read timeout?!?!??!")?;
 
-        if let Ok((len, addr)) = socket.recv_from(buf) {
-            match buf[..len].try_into() {
+        match socket.recv_from(buf) {
+            Ok((len, addr)) => match buf[..len].try_into() {
                 Ok(Command::Stop) => break,
 
                 Ok(Command::Ping) => {
@@ -226,7 +226,9 @@ fn inner_loop(
                 }
 
                 _ => (),
-            }
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => (),
+            Err(_) => Err("Error while receiving command")?,
         }
 
         socket
@@ -244,19 +246,13 @@ fn inner_loop(
             .copy_to(&mut draw)
             .map_err(|_| "Couldn't copy frame")?;
 
-        // TODO: think about this (do we actually want rotation data from each client)
-        if let Some((marker_id, x)) = aruco.detect(frame, Some(&mut draw))? {
+        if let Some(data) = aruco.detect(frame, Some(&mut draw))? {
             socket
                 .send_to(
-                    &Into::<Vec<u8>>::into(Command::ValueUpdate(ClientData {
-                        target_x_position: x,
-                        marker_id,
-                    })),
+                    &Into::<Vec<u8>>::into(Command::ValueUpdate(data)),
                     config.server,
                 )
                 .map_err(|_| "Couldn't send value")?;
-        } else {
-            todo!()
         }
 
         if gui {

@@ -7,7 +7,7 @@ use opencv::{
 };
 
 use crate::util::{self, Center, Color};
-use camloc_common::cv::get_aruco_dictionary;
+use camloc_common::{cv::get_aruco_dictionary, hosts::ClientData};
 
 pub struct Detector {
     detector: objdetect::ArucoDetector,
@@ -45,7 +45,7 @@ impl Detector {
         frame: &mut Mat,
         rect: Option<&mut core::Rect>,
         draw: Option<&mut Mat>,
-    ) -> Result<Option<(u8, f64)>, &'static str> {
+    ) -> Result<Option<ClientData>, &'static str> {
         self.detector
             .detect_markers(
                 frame,
@@ -79,7 +79,10 @@ impl Detector {
             util::rect(draw, brect, Color::Yellow).map_err(|_| "Couldn't draw rectangle")?;
         }
 
-        Ok(Some((marker_id, util::relative_x(frame, center))))
+        Ok(Some(ClientData {
+            marker_id,
+            target_x_position: util::relative_x(frame, center),
+        }))
     }
 }
 
@@ -139,9 +142,10 @@ impl Tracker {
 }
 
 pub struct Aruco {
-    tracked_object: Option<(u8, f64)>,
+    tracked_object: Option<ClientData>,
     detector: Detector,
     tracker: Tracker,
+    // TODO: sanity checks
 }
 
 impl Aruco {
@@ -157,9 +161,12 @@ impl Aruco {
         &mut self,
         frame: &mut Mat,
         draw: Option<&mut Mat>,
-    ) -> Result<Option<(u8, f64)>, &'static str> {
-        self.tracked_object = if let Some((id, _)) = self.tracked_object {
-            self.tracker.track(frame, draw)?.map(|x| (id, x))
+    ) -> Result<Option<ClientData>, &'static str> {
+        self.tracked_object = if let Some(ClientData { marker_id, .. }) = self.tracked_object {
+            self.tracker.track(frame, draw)?.map(|x| ClientData {
+                marker_id,
+                target_x_position: x,
+            })
         } else {
             let res = self
                 .detector
