@@ -17,7 +17,7 @@ use opencv::{
 };
 use std::{
     fs::File,
-    io::{Read, Write},
+    io::{ErrorKind, Read, Write},
     net::{IpAddr, SocketAddr, TcpStream, UdpSocket},
     time::Duration,
 };
@@ -227,7 +227,7 @@ fn inner_loop(
 
                 _ => (),
             },
-            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => (),
+            Err(e) if matches!(e.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock) => (),
             Err(_) => Err("Error while receiving command")?,
         }
 
