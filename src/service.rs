@@ -281,11 +281,18 @@ impl<
                     .await?;
                 }
 
-                Ok(Command::InfoUpdate { position, fov }) => {
+                Ok(Command::InfoUpdate {
+                    client_ip,
+                    position,
+                    fov,
+                }) => {
                     let mut clients = self.clients.lock().await;
-                    for i in 0..clients.len() {
-                        if clients[i].address == recv_addr {
-                            clients[i].camera = PlacedCamera::new(position, fov);
+                    for c in clients.iter_mut() {
+                        if c.address.ip().to_string() == client_ip {
+                            c.camera.position = position;
+                            if let Some(fov) = fov {
+                                c.camera.fov = fov;
+                            }
                             break;
                         }
                     }
