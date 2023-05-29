@@ -84,7 +84,6 @@ pub fn yes_no_choice(prompt: &str, default: bool) -> bool {
     }
 }
 
-// TODO: indexes xd
 pub fn choice<T: Display>(
     listed: impl Iterator<Item = (T, bool)>,
     choice_prompt: Option<&str>,
@@ -134,6 +133,17 @@ impl<T> TimeValidatedValue<T> {
             last_changed,
             valid_time,
             value,
+        }
+    }
+
+    pub fn new_invalid(valid_time: Duration) -> Self
+    where
+        T: Default,
+    {
+        Self {
+            last_changed: Instant::now() - valid_time,
+            value: T::default(),
+            valid_time,
         }
     }
 

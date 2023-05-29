@@ -223,14 +223,12 @@ impl<'a> TryFrom<&'a [u8]> for Command<'a> {
             Command::IMAGES_DONE => Command::ImagesDone,
             Command::DISCONNECT => Command::Disconnect,
 
-            Command::VALUE_UPDATE => {
-                Command::ValueUpdate(ClientData {
-                    marker_id: u8::from_be(buf[0]),
-                    target_x_position: f64::from_be_bytes(
-                        buf[1..size_of::<f64>() + 1].try_into().map_err(|_| ())?,
-                    ),
-                })
-            }
+            Command::VALUE_UPDATE => Command::ValueUpdate(ClientData {
+                marker_id: u8::from_be(buf[0]),
+                target_x_position: f64::from_be_bytes(
+                    buf[1..size_of::<f64>() + 1].try_into().map_err(|_| ())?,
+                ),
+            }),
 
             Command::CONNECT => Command::Connect {
                 position: Position::from_be_bytes(&buf[..24].try_into().unwrap()),
