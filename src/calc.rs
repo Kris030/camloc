@@ -13,17 +13,11 @@ impl PlacedCamera {
     }
 }
 
-pub struct Setup {
-    pub cameras: Vec<PlacedCamera>,
-}
+pub struct Setup;
 
 impl Setup {
-    pub fn new() -> Self {
-        Self { cameras: vec![] }
-    }
-
-    pub fn calculate_position(&self, position_data: PositionData) -> Option<Position> {
-        let c = self.cameras.len();
+    pub fn calculate_position(position_data: PositionData) -> Option<Position> {
+        let c = position_data.cameras.len();
         debug_assert_eq!(c, position_data.client_data.len());
 
         let mut tangents = vec![None; c];
@@ -33,8 +27,8 @@ impl Setup {
         for i in 0..c {
             if let Some(d) = position_data.client_data[i] {
                 tangents[i] = Some(
-                    (self.cameras[i].position.rotation
-                        + (self.cameras[i].fov * (0.5 - d.target_x_position)))
+                    (position_data.cameras[i].position.rotation
+                        + (position_data.cameras[i].fov * (0.5 - d.target_x_position)))
                         .tan(),
                 );
                 lines += 1;
@@ -52,11 +46,11 @@ impl Setup {
                 let Some(atan) = tangents[i] else { continue; };
                 let Some(btan) = tangents[j] else { continue; };
 
-                let c1 = self.cameras[i].position;
-                let c2 = self.cameras[j].position;
+                let c1 = position_data.cameras[i].position;
+                let c2 = position_data.cameras[j].position;
 
                 let px = (c1.x * atan - c2.x * btan - c1.y + c2.y) / (atan - btan);
-                let py = atan * (x - c1.x) + c1.y;
+                let py = atan * (px - c1.x) + c1.y;
 
                 x += px / points;
                 y += py / points;
@@ -65,8 +59,7 @@ impl Setup {
 
         let comp_rot = position_data.compass_data;
         let pos_rot = Setup::get_pos_based_rotation(x, y, &position_data);
-        // TODO: handle clients rot data (?)
-
+        // TODO: improve calculation
         let (mut r, mut rc) = (0., 0u64);
         #[allow(clippy::manual_flatten)]
         for rot in [comp_rot, pos_rot] {
@@ -98,12 +91,7 @@ impl Setup {
     }
 }
 
-impl Default for Setup {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
+// TODO: think about turning in place
 #[derive(Clone, Copy)]
 pub enum MotionHint {
     MovingForwards,
@@ -129,6 +117,7 @@ impl MotionData {
 pub struct PositionData<'a> {
     pub client_data: &'a [Option<ClientData>],
     pub motion_data: Option<MotionData>,
+    pub cameras: &'a [PlacedCamera],
     pub compass_data: Option<f64>,
     pub last_position: Position,
     pub cube: [u8; 4],
@@ -138,12 +127,14 @@ impl<'a> PositionData<'a> {
     pub fn new(
         client_data: &'a [Option<ClientData>],
         motion_data: Option<MotionData>,
+        cameras: &'a [PlacedCamera],
         compass_data: Option<f64>,
         last_position: Position,
         cube: [u8; 4],
     ) -> Self {
         Self {
             cube,
+            cameras,
             client_data,
             motion_data,
             compass_data,

@@ -6,13 +6,9 @@ edition = "2021"
 [dependencies]
 # TODO: camloc_common = { git = "https://github.com/Kris030/camloc_common" }
 camloc_common = { path = "../common" }
-tokio = { version = "1.27.0", features = [
-	"time", "net", "rt", "sync", "macros", "io-util", "io-std", "rt-multi-thread", "fs"
-] }
+futures = "0.3.28"
+tokio = { version = "1.28.0", features = ["full"] }
 tokio-serial = { version = "5.4.4", optional = true, features = ["libudev"] }
-
-[dev-dependencies]
-ctrlc = "3.2.5"
 
 [features]
 default = []

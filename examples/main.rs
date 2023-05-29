@@ -5,11 +5,8 @@ use camloc_server::{
     extrapolations::{Extrapolation, LinearExtrapolation},
     service::{LocationService, Subscriber, TimedPosition},
 };
-use std::{future::Future, pin::Pin, time::Duration};
-use tokio::{
-    io::{stderr, AsyncWriteExt},
-    sync::watch,
-};
+use std::{net::SocketAddr, time::Duration};
+use tokio::io::{stderr, AsyncWriteExt};
 use tokio_serial::{SerialPortBuilderExt, SerialPortType};
 
 fn main() {
@@ -18,21 +15,6 @@ fn main() {
     } else {
         println!("Exiting test...");
     }
-}
-
-async fn send_camera(address: String, camera: PlacedCamera) -> tokio::io::Result<()> {
-    let mut se = stderr();
-    se.write_i32(1).await?;
-    se.write_u16(address.len() as u16).await?;
-    se.write_all(address.as_bytes()).await?;
-
-    se.write_f64(camera.position.x).await?;
-    se.write_f64(camera.position.y).await?;
-    se.write_f64(camera.position.rotation).await?;
-
-    se.write_f64(camera.fov).await?;
-
-    Ok(())
 }
 
 fn get_compass() -> Result<Option<SerialCompass>, &'static str> {
@@ -94,7 +76,7 @@ fn get_compass() -> Result<Option<SerialCompass>, &'static str> {
 }
 
 #[tokio::main]
-async fn run() -> Result<(), String> {
+async fn run() -> Result<(), &'static str> {
     let compass = Box::leak(get_compass()?.into());
     let mut location_service = LocationService::start(
         Some(Extrapolation::<LinearExtrapolation>::new(
@@ -114,78 +96,54 @@ async fn run() -> Result<(), String> {
             let address = address.to_string();
             println!("New camera connected from {address}");
             Box::pin(async move {
-                send_camera(address, camera).await.unwrap();
+                on_connect(address, camera)
+                    .await
+                    .map_err(|_| "Couldn't send camera")
             })
         }))
         .await;
 
     location_service
-        .subscribe(Subscriber::Disconnection(|address, _| {
-            let address = address.to_string();
-            println!("Camera disconnected from {address}");
+        .subscribe(Subscriber::Disconnection(|c, _| {
             Box::pin(async move {
-                let mut se = stderr();
-                se.write_i32(2).await.unwrap();
-                se.write_u16(address.len() as u16).await.unwrap();
-                se.write_all(address.as_bytes()).await.unwrap();
+                on_disconnect(c)
+                    .await
+                    .map_err(|_| "Couldn't send camera connection")
             })
         }))
         .await;
 
-    fn write_to_stderr_binary(p: TimedPosition) -> Pin<Box<dyn Future<Output = ()> + Send>> {
-        use tokio::io::{stderr, AsyncWriteExt};
-        Box::pin(async move {
-            println!("{p}");
-
-            let mut buf = 0i32.to_be_bytes().to_vec();
-            buf.append(
-                &mut [
-                    p.position.x.to_be_bytes(),
-                    p.position.y.to_be_bytes(),
-                    p.position.rotation.to_be_bytes(),
-                ]
-                .concat(),
-            );
-
-            stderr()
-                .write_all(&buf[..])
-                .await
-                .expect("Couldn't write coords to stderr???");
-        })
-    }
-
-    let (tx, mut rx) = watch::channel(());
-    // needed because of static lifetime
-    let tx = Box::leak(tx.into());
-    ctrlc::set_handler(|| {
-        if tx.send(()).is_err() {
-            println!("ctrlc pressed but unable to handle signal");
-        }
-    })
-    .map_err(|_| "Couldn't setup ctrl+c handler")?;
+    let ctrlc_task = tokio::spawn(async move { tokio::signal::ctrl_c().await });
 
     if yes_no_choice("Subscription or query mode?", true) {
         location_service
-            .subscribe(Subscriber::Position(write_to_stderr_binary))
+            .subscribe(Subscriber::Position(|p| {
+                Box::pin(async move {
+                    on_position(p)
+                        .await
+                        .map_err(|_| "Couldn't send camera connection")
+                })
+            }))
             .await;
 
-        rx.changed()
-            .await
-            .map_err(|_| "Something failed in the ctrl+c channel")?;
+        if let Ok(Ok(())) = ctrlc_task.await {
+            return Err("Something failed in the ctrl+c channel");
+        }
+
         location_service.stop().await;
     } else {
         let mut interval = tokio::time::interval(Duration::from_millis(50));
         loop {
             if let Some(p) = location_service.get_position().await {
-                write_to_stderr_binary(p).await;
+                on_position(p).await.map_err(|_| "Couldn't send position")?;
             } else {
                 println!("Couldn't get position");
             }
 
-            if rx
-                .has_changed()
-                .map_err(|_| "Something failed in the ctrl+c channel")?
-            {
+            if ctrlc_task.is_finished() {
+                if let Ok(Ok(())) = ctrlc_task.await {
+                    return Err("Something failed in the ctrl+c channel");
+                }
                 break;
             }
 
@@ -193,5 +151,48 @@ async fn run() -> Result<(), String> {
         }
     }
 
+    Ok(())
+}
+
+async fn on_position(p: TimedPosition) -> tokio::io::Result<()> {
+    println!("{p}");
+
+    let mut buf = 0i32.to_be_bytes().to_vec();
+    buf.append(
+        &mut [
+            p.position.x.to_be_bytes(),
+            p.position.y.to_be_bytes(),
+            p.position.rotation.to_be_bytes(),
+        ]
+        .concat(),
+    );
+
+    stderr().write_all(&buf[..]).await?;
+
+    Ok(())
+}
+
+async fn on_connect(address: String, camera: PlacedCamera) -> tokio::io::Result<()> {
+    let mut se = stderr();
+    se.write_i32(1).await?;
+    se.write_u16(address.len() as u16).await?;
+    se.write_all(address.as_bytes()).await?;
+
+    se.write_f64(camera.position.x).await?;
+    se.write_f64(camera.position.y).await?;
+    se.write_f64(camera.position.rotation).await?;
+
+    se.write_f64(camera.fov).await?;
+
+    Ok(())
+}
+
+async fn on_disconnect(address: SocketAddr) -> tokio::io::Result<()> {
+    let address = address.to_string();
+    println!("Camera disconnected from {address}");
+    let mut se = stderr();
+    se.write_i32(2).await?;
+    se.write_u16(address.len() as u16).await?;
+    se.write_all(address.as_bytes()).await?;
     Ok(())
 }

@@ -3,6 +3,7 @@ use camloc_common::{
     position::Position,
     TimeValidatedValue,
 };
+use futures::future::try_join_all;
 use std::{
     f64::NAN,
     fmt::{Debug, Display},
@@ -28,15 +29,24 @@ static DATA_VALIDITY: Duration = Duration::from_millis(500);
 
 struct ClientInfo {
     last_data: TimeValidatedValue<ClientData>,
+    camera: PlacedCamera,
     address: SocketAddr,
 }
 impl ClientInfo {
-    fn new(address: SocketAddr, last_data: TimeValidatedValue<ClientData>) -> Self {
-        Self { address, last_data }
+    fn new(
+        address: SocketAddr,
+        camera: PlacedCamera,
+        last_data: TimeValidatedValue<ClientData>,
+    ) -> Self {
+        Self {
+            address,
+            camera,
+            last_data,
+        }
     }
 }
 
-type RetFuture<T = ()> = Pin<Box<dyn Future<Output = T> + Send>>;
+type RetFuture<T = Result<(), &'static str>> = Pin<Box<dyn Future<Output = T> + Send>>;
 
 pub enum Subscriber {
     Connection(fn(SocketAddr, PlacedCamera) -> RetFuture),
@@ -44,6 +54,7 @@ pub enum Subscriber {
     Position(fn(TimedPosition) -> RetFuture),
 }
 
+/// TODO: revert to dyn because runtime changeing?
 pub struct LocationService<
     E: Send + Extrapolator,
     C: FnMut() -> F,
@@ -57,7 +68,6 @@ pub struct LocationService<
     clients: Mutex<Vec<ClientInfo>>,
     start_time: RwLock<Instant>,
     running: RwLock<bool>,
-    setup: RwLock<Setup>,
 }
 
 pub struct LocationServiceHandle<
@@ -100,7 +110,7 @@ impl<
         extrapolation: Option<Extrapolation<E>>,
         port: u16,
         compass: Option<C>,
-    ) -> Result<LocationServiceHandle<E, C, F>, String> {
+    ) -> Result<LocationServiceHandle<E, C, F>, &'static str> {
         let start_time = Instant::now();
 
         let udp_socket = UdpSocket::bind(("0.0.0.0", port))
@@ -115,7 +125,6 @@ impl<
                 interpolated: None,
             }
             .into(),
-            setup: Setup::new().into(),
             subscriptions: vec![].into(),
             start_time: start_time.into(),
             extrap: extrapolation.into(),
@@ -217,6 +226,7 @@ impl<
                     marker_id,
                     target_x_position: value,
                 })) => {
+                    // TODO: clean up
                     let mut clients = self.clients.lock().await;
                     let mut client_index = None;
                     let (mut min_t, mut min_index) = (start_time, 0);
@@ -250,8 +260,10 @@ impl<
                 // connection request
                 Ok(Command::Connect { position, fov }) => {
                     // TODO: do it better?
+                    let camera = PlacedCamera::new(position, fov);
                     self.clients.lock().await.push(ClientInfo::new(
                         recv_addr,
+                        camera,
                         TimeValidatedValue::new_with_change(
                             ClientData::new(255, NAN),
                             DATA_VALIDITY,
@@ -259,37 +271,50 @@ impl<
                         ),
                     ));
 
-                    let cam = PlacedCamera::new(position, fov);
-                    self.setup.write().await.cameras.push(cam);
-
-                    for s in self.subscriptions.read().await.iter() {
+                    try_join_all(self.subscriptions.read().await.iter().filter_map(|s| {
                         if let Subscriber::Connection(s) = s {
-                            s(recv_addr, cam).await;
+                            Some(s(recv_addr, camera))
+                        } else {
+                            None
+                        }
+                    }))
+                    .await?;
+                }
+
+                Ok(Command::InfoUpdate { position, fov }) => {
+                    let mut clients = self.clients.lock().await;
+                    for i in 0..clients.len() {
+                        if clients[i].address == recv_addr {
+                            clients[i].camera = PlacedCamera::new(position, fov);
+                            break;
                         }
                     }
                 }
 
-                // TODO: Command::InfoUpdate
-                Ok(Command::InfoUpdate { .. }) => todo!(),
+                Ok(Command::Stop) => break,
 
-                // TODO: Command::Stop
-                Ok(Command::Stop) => todo!(),
-
-                // TODO: Command::Disconnect
-                Ok(Command::Disconnect) => todo!(),
+                Ok(Command::Disconnect) => {
+                    let mut clients = self.clients.lock().await;
+                    for i in 0..clients.len() {
+                        if clients[i].address == recv_addr {
+                            clients.remove(i);
+                            break;
+                        }
+                    }
+                }
 
                 _ => (),
             }
         }
 
-        for c in self.clients.lock().await.iter() {
+        try_join_all(self.clients.lock().await.iter().map(|c| async {
             udp_socket
                 .send_to(&[Command::STOP], c.address)
                 .await
                 .map_err(|_| "Couldn't tell all clients to stop")?;
-        }
-
-        println!("Server shut down");
+            Ok::<(), &'static str>(())
+        }))
+        .await?;
 
         Ok(())
     }
@@ -311,9 +336,18 @@ impl<
         drop(compass);
 
         let mut last_pos = self.last_known_pos.write().await;
+        let cameras: Vec<PlacedCamera> =
+            self.clients.lock().await.iter().map(|c| c.camera).collect();
 
-        let data = PositionData::new(pxs, *motion_data, compass_value, last_pos.position, cube);
-        let Some(position) = self.setup.read().await.calculate_position(data) else { return Ok(()); };
+        let data = PositionData::new(
+            pxs,
+            *motion_data,
+            &cameras,
+            compass_value,
+            last_pos.position,
+            cube,
+        );
+        let Some(position) = Setup::calculate_position(data) else { return Ok(()); };
 
         let calculated_position = TimedPosition {
             position,
@@ -329,12 +363,14 @@ impl<
             ex.extrapolator.add_datapoint(calculated_position);
         };
 
-        let subs = self.subscriptions.read().await;
-        for s in subs.iter() {
+        try_join_all(self.subscriptions.read().await.iter().filter_map(|s| {
             if let Subscriber::Position(s) = s {
-                s(calculated_position).await;
+                Some(s(calculated_position))
+            } else {
+                None
             }
-        }
+        }))
+        .await?;
 
         Ok(())
     }
