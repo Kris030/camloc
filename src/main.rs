@@ -89,7 +89,11 @@ impl SetupType {
 }
 
 fn get_setup_type() -> Result<SetupType, &'static str> {
-    match get_from_stdin("Select setup type square (0) / free (1): ")? {
+    match choice(
+        [("Square", true), ("Free", true)].into_iter(),
+        Some("Select setup type:"),
+        Some(1),
+    )? {
         0 => Ok(SetupType::Square {
             side_length: get_from_stdin("Enter side length: ")?,
         }),
@@ -137,6 +141,7 @@ fn main() -> Result<(), String> {
         organizer.handle_commands()?;
     }
 }
+
 struct Organizer<'a, 'b, const BUFFER_SIZE: usize> {
     buffer: &'a mut [u8; BUFFER_SIZE],
     hosts: &'b mut Vec<Host>,
@@ -155,49 +160,71 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
                 return Ok(());
             }
         };
-        match server.info {
-            HostInfo {
-                host_type: HostType::Server,
-                host_state: HostState::Idle,
-            } => {
-                if !yes_no_choice("Server isn't running, do you want to start it?", true) {
-                    return Ok(());
-                }
-
-                self.sock
-                    .send_to(
-                        &Into::<Vec<u8>>::into(Command::StartServer { cube: self.cube }),
-                        (server.ip, MAIN_PORT),
-                    )
-                    .map_err(|_| "Couldn't start server")?;
-
+        if let HostState::Idle = server.info.host_state {
+            if !yes_no_choice("Server isn't running, do you want to start it?", true) {
                 return Ok(());
             }
-            HostInfo {
-                host_type: HostType::Server,
-                host_state: _,
-            } => (),
-            _ => unreachable!(),
+
+            self.sock
+                .send_to(
+                    &Into::<Vec<u8>>::into(Command::StartServer { cube: self.cube }),
+                    (server.ip, MAIN_PORT),
+                )
+                .map_err(|_| "Couldn't start server")?;
+
+            return Ok(());
         }
 
-        let Ok(ind) = get_from_stdin::<usize>("Enter command: start (0) / stop (1): ") else {
+        #[derive(Debug, Clone, Copy)]
+        enum OrganizerCommand {
+            Start,
+            Stop,
+            List,
+            Scan,
+            Update,
+            Quit,
+        }
+        use OrganizerCommand::*;
+        const COMMANDS: [OrganizerCommand; 6] = [Start, Stop, List, Scan, Update, Quit];
+        impl std::fmt::Display for OrganizerCommand {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{self:?}")
+            }
+        }
+
+        let cmd = choice(
+            COMMANDS.map(|c| (c, true)).into_iter(),
+            Some("Choose action:"),
+            None,
+        );
+        let Ok(cmd) = cmd.map(|i| COMMANDS[i]) else {
             return Ok(())
         };
         println!();
-        match ind {
-            0 => {
+        match cmd {
+            Start => {
                 let server_ip = server.ip.to_string();
                 if let Err(e) = self.start_host(&server_ip) {
                     println!("Couldn't start client because: {e}");
                 }
             }
 
-            1 => {
+            Stop => {
                 if let Err(e) = self.stop_host() {
                     println!("Couldn't stop client because: {e}");
                 }
             }
-            _ => (),
+            List => {
+                for h in self.hosts.iter() {
+                    println!("{h}");
+                }
+            }
+            Scan => (),
+            Update => todo!(),
+            Quit => {
+                println!("Quitting...");
+                std::process::exit(0)
+            }
         }
         println!();
         Ok(())
