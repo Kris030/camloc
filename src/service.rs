@@ -252,7 +252,8 @@ impl<
                             .set_with_time(ClientData::new(marker_id, value), recv_time);
 
                         if min_index == ci {
-                            self.update_position(start_time, &values[..], cube).await?;
+                            self.update_position(start_time, &clients, &values[..], cube)
+                                .await?;
                         }
                     }
                 }
@@ -329,6 +330,7 @@ impl<
     async fn update_position(
         self: &Arc<LocationService<E, C, F>>,
         start_time: Instant,
+        clients: &[ClientInfo],
         pxs: &[Option<ClientData>],
         cube: [u8; 4],
     ) -> Result<(), String> {
@@ -343,8 +345,7 @@ impl<
         drop(compass);
 
         let mut last_pos = self.last_known_pos.write().await;
-        let cameras: Vec<PlacedCamera> =
-            self.clients.lock().await.iter().map(|c| c.camera).collect();
+        let cameras: Vec<PlacedCamera> = clients.iter().map(|c| c.camera).collect();
 
         let data = PositionData::new(
             pxs,
