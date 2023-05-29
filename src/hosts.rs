@@ -118,19 +118,30 @@ pub enum HostState {
 pub enum Command<'a> {
     Ping,
 
-    Connect { position: Position, fov: f64 },
+    Connect {
+        position: Position,
+        fov: f64,
+    },
     Disconnect,
 
     Start,
-    StartServer { cube: [u8; 4] },
-    StartConfigless { ip: &'a str },
+    StartServer {
+        cube: [u8; 4],
+    },
+    StartConfigless {
+        ip: &'a str,
+    },
     Stop,
 
     RequestImage,
     ImagesDone,
 
     ValueUpdate(ClientData),
-    InfoUpdate { position: Position, fov: f64 },
+    InfoUpdate {
+        client_ip: &'a str,
+        position: Position,
+        fov: Option<f64>,
+    },
 }
 impl Command<'_> {
     pub const PING: u8 = 0x0b;
@@ -190,12 +201,32 @@ impl From<Command<'_>> for Vec<u8> {
             ]
             .concat(),
 
-            Command::InfoUpdate { position, fov } => [
-                Command::INFO_UPDATE.to_be_bytes().as_slice(),
-                position.to_be_bytes().as_slice(),
-                fov.to_be_bytes().as_slice(),
-            ]
-            .concat(),
+            Command::InfoUpdate {
+                client_ip,
+                position,
+                fov,
+            } => {
+                let ip = client_ip.as_bytes();
+                let ip_len = (ip.len() as u16).to_be_bytes();
+                let c = Command::INFO_UPDATE.to_be_bytes();
+                let p = position.to_be_bytes();
+                let f = if fov.is_some() { 1u8 } else { 0u8 }.to_be_bytes();
+
+                let mut v = vec![
+                    ip_len.as_slice(),
+                    ip,
+                    c.as_slice(),
+                    p.as_slice(),
+                    f.as_slice(),
+                ];
+
+                let fov = fov.map(f64::to_be_bytes);
+                if let Some(fov) = &fov {
+                    v.push(fov);
+                }
+
+                v.concat()
+            }
         }
     }
 }
@@ -239,14 +270,23 @@ impl<'a> TryFrom<&'a [u8]> for Command<'a> {
                 ),
             },
 
-            Command::INFO_UPDATE => Command::InfoUpdate {
-                position: Position::from_be_bytes(&buf[..24].try_into().unwrap()),
-                fov: f64::from_be_bytes(
-                    buf[3 * size_of::<f64>()..4 * size_of::<f64>()]
-                        .try_into()
-                        .map_err(|_| ())?,
-                ),
-            },
+            Command::INFO_UPDATE => {
+                let ip_len = u16::from_be_bytes(buf[..2].try_into().unwrap()) as usize;
+                let client_ip = std::str::from_utf8(&buf[2..2 + ip_len]).unwrap();
+                let position = Position::from_be_bytes(&buf[..26].try_into().unwrap());
+                let fov = if buf[26] == 1 {
+                    Some(f64::from_be_bytes(
+                        buf[27..27 + size_of::<f64>()].try_into().map_err(|_| ())?,
+                    ))
+                } else {
+                    None
+                };
+                Command::InfoUpdate {
+                    client_ip,
+                    position,
+                    fov,
+                }
+            }
 
             Command::START_CONFIGLESS => {
                 let ip_len = u16::from_be_bytes(buf[..size_of::<u16>()].try_into().map_err(|_| ())?)
