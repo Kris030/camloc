@@ -91,7 +91,7 @@ impl SetupType {
 fn get_setup_type() -> Result<SetupType, &'static str> {
     match choice(
         [("Square", true), ("Free", true)].into_iter(),
-        Some("Select setup type:"),
+        Some("Select setup type: "),
         Some(1),
     )? {
         0 => Ok(SetupType::Square {
@@ -160,6 +160,7 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
                 return Ok(());
             }
         };
+        let server_ip = server.ip;
         if let HostState::Idle = server.info.host_state {
             if !yes_no_choice("Server isn't running, do you want to start it?", true) {
                 return Ok(());
@@ -194,7 +195,7 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
 
         let cmd = choice(
             COMMANDS.map(|c| (c, true)).into_iter(),
-            Some("Choose action:"),
+            Some("Choose action: "),
             None,
         );
         let Ok(cmd) = cmd.map(|i| COMMANDS[i]) else {
@@ -203,7 +204,7 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
         println!();
         match cmd {
             Start => {
-                let server_ip = server.ip.to_string();
+                let server_ip = server_ip.to_string();
                 if let Err(e) = self.start_host(&server_ip) {
                     println!("Couldn't start client because: {e}");
                 }
@@ -220,7 +221,57 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
                 }
             }
             Scan => (),
-            Update => todo!(),
+            Update => 'update: {
+                let options: Vec<(&Host, bool)> = self
+                    .hosts
+                    .iter()
+                    .filter_map(|h| {
+                        if matches!(
+                            h.info,
+                            HostInfo {
+                                host_type: HostType::Client { .. } | HostType::ConfiglessClient,
+                                host_state: HostState::Idle
+                            }
+                        ) {
+                            Some((h, true))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if options.is_empty() {
+                    println!("No clients found");
+                    break 'update;
+                }
+
+                let host_index = choice(
+                    options.into_iter(),
+                    Some("\nSelect client to update: "),
+                    None,
+                )?;
+
+                let position = Position::new(
+                    get_from_stdin("  x: ")?,
+                    get_from_stdin("  y: ")?,
+                    get_from_stdin::<f64>("  rotation (degrees): ")?.to_radians(),
+                );
+                let fov = if yes_no_choice("  Do you also want to change the fov?", false) {
+                    Some(get_from_stdin::<f64>("  fov (degrees): ")?.to_radians())
+                } else {
+                    None
+                };
+
+                self.sock
+                    .send_to(
+                        &Into::<Vec<u8>>::into(Command::InfoUpdate {
+                            client_ip: &self.hosts[host_index].ip.to_string(),
+                            position,
+                            fov,
+                        }),
+                        (server_ip, MAIN_PORT),
+                    )
+                    .map_err(|_| "Couldn't send client info update to server")?;
+            }
             Quit => {
                 println!("Quitting...");
                 std::process::exit(0)
