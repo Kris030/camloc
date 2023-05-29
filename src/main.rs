@@ -25,16 +25,15 @@ use std::{
 const BUF_SIZE: usize = 2048;
 
 struct Config {
-    position: Position,
     calibration: FullCameraInfo,
     server: SocketAddr,
     cube: [u8; 4],
 }
 
 impl Config {
-    fn to_connection_request(&self) -> Option<[u8; 33]> {
+    fn to_connection_request(&self, position: Position) -> Option<[u8; 33]> {
         Into::<Vec<u8>>::into(Command::Connect {
-            position: self.position,
+            position,
             fov: self.calibration.horizontal_fov,
         })
         .try_into()
@@ -44,7 +43,7 @@ impl Config {
     fn from_organizer(
         r: &mut impl Read,
         cached_calibration: &Option<FullCameraInfo>,
-    ) -> Result<Self, &'static str> {
+    ) -> Result<(Self, Position), &'static str> {
         let mut buf = vec![0; 26];
         r.read_exact(&mut buf)
             .map_err(|_| "Couldn't read config x, y, rotation, ip_len")?;
@@ -71,12 +70,14 @@ impl Config {
         let mut cube = [0; 4];
         r.read_exact(&mut cube).map_err(|_| "Couldn't get cube")?;
 
-        Ok(Self {
-            position: Position::new(x, y, rotation),
-            calibration,
-            server,
-            cube: cube.map(u8::from_be),
-        })
+        Ok((
+            Self {
+                calibration,
+                server,
+                cube: cube.map(u8::from_be),
+            },
+            Position::new(x, y, rotation),
+        ))
     }
 }
 
@@ -159,7 +160,7 @@ fn main() -> Result<(), &'static str> {
             .map_err(|_| "Couldn't create camera instance")?;
 
         // recieve camera info and server ip
-        let config = match get_config(
+        let (config, pos) = match get_config(
             &mut buf,
             &organizer.ip(),
             &mut cam,
@@ -175,7 +176,7 @@ fn main() -> Result<(), &'static str> {
 
         // connect to server
         socket
-            .send_to(&config.to_connection_request().unwrap(), config.server)
+            .send_to(&config.to_connection_request(pos).unwrap(), config.server)
             .map_err(|_| "Couldn't connect to server")?;
 
         inner_loop(&socket, &mut cam, config, &mut buf, &mut frame, args.gui)?;
@@ -276,7 +277,7 @@ fn get_config(
     cam: &mut VideoCapture,
     mut frame: &mut Mat,
     cached_calibration: &Option<FullCameraInfo>,
-) -> Result<Config, &'static str> {
+) -> Result<(Config, Position), &'static str> {
     let mut s = TcpStream::connect((*organizer, ORGANIZER_STARTER_PORT))
         .map_err(|_| "Couldn't connect to organizer tcp")?;
 
