@@ -6,6 +6,6 @@ edition = "2021"
 [dependencies]
 # TODO: camloc_common = { git = "https://github.com/Kris030/camloc_common", features = ["cv"] }
 camloc_common = { path = "../common", features = ["cv"] }
-clap = { version = "4.2.4", features = ["derive"] }
-opencv = "0.80.0"
-ctrlc = "3.2.5"
+clap = { version = "4.3.0", features = ["derive"] }
+opencv = "0.82.0"
+ctrlc = "3.3.1"

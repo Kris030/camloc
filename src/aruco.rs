@@ -2,8 +2,9 @@ use opencv::{
     core::{self, Ptr, Rect},
     objdetect,
     prelude::*,
-    tracking, types,
-    video::Tracker as CVTracker,
+    tracking::{self, TrackerKCF},
+    types,
+    video::TrackerTrait,
 };
 
 use crate::util::{self, Center, Color};
@@ -87,7 +88,7 @@ impl Detector {
 }
 
 pub struct Tracker {
-    tracker: Ptr<dyn tracking::TrackerKCF>,
+    kcf: Ptr<TrackerKCF>,
     /// bounding box of the tracked area
     pub rect: Rect,
 }
@@ -95,14 +96,14 @@ pub struct Tracker {
 impl Tracker {
     pub fn new() -> Result<Self, &'static str> {
         Ok(Self {
-            tracker: Self::reinit(&Mat::default(), Rect::default())?,
+            kcf: Self::reinit(&Mat::default(), Rect::default())?,
             rect: Rect::default(),
         })
     }
 
     /// creates a new `TrackerKCF` struct (because calling `init` on the same instance causes segfaults for whatever reason)
-    fn reinit(frame: &Mat, rect: Rect) -> Result<Ptr<dyn tracking::TrackerKCF>, &'static str> {
-        let mut tracker = <dyn tracking::TrackerKCF>::create(
+    fn reinit(frame: &Mat, rect: Rect) -> Result<Ptr<TrackerKCF>, &'static str> {
+        let mut tracker = TrackerKCF::create(
             tracking::TrackerKCF_Params::default()
                 .map_err(|_| "Couldn't get default tracker params")?,
         )
@@ -116,7 +117,7 @@ impl Tracker {
     }
 
     pub fn init(&mut self, frame: &Mat) -> Result<(), &'static str> {
-        self.tracker = Self::reinit(frame, self.rect).map_err(|_| "Couldn't init tracker")?;
+        self.kcf = Self::reinit(frame, self.rect).map_err(|_| "Couldn't init tracker")?;
         Ok(())
     }
 
@@ -126,7 +127,7 @@ impl Tracker {
         frame: &Mat,
         draw: Option<&mut Mat>,
     ) -> Result<Option<f64>, &'static str> {
-        match self.tracker.update(&frame, &mut self.rect) {
+        match self.kcf.update(&frame, &mut self.rect) {
             Ok(true) => {
                 if let Some(draw) = draw {
                     util::rect(draw, self.rect, Color::Cyan).map_err(|_| "Couldn't draw rect")?;
