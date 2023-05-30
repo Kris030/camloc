@@ -1,12 +1,15 @@
 [package]
-name = "camloc_common"
-version = "0.1.0"
+name = "camloc-common"
+version = "1.0.0"
+authors = ["Kris030", "danipatko"]
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+description = "A DIY commons library for a DIY GPS for a dank engine."
+repository = "https://github.com/Kris030/camloc-common"
+exclude = ["protocol.txt"]
 
 [dependencies]
-opencv = { version = "0.82.0", optional = true }
+opencv = { version = "0.82", optional = true }
+anyhow = "1.0.71"
 
 [features]
 default = []

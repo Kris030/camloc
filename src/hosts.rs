@@ -1,15 +1,15 @@
 use std::mem::size_of;
 
-use crate::position::Position;
+use crate::Position;
 
 #[allow(clippy::unusual_byte_groupings)]
 pub mod constants {
-    pub const UDP_MAX_MESSAGE_LENGTH: usize = 65507;
 
     pub const MAIN_PORT: u16 = 0xdddd;
     pub const ORGANIZER_STARTER_PORT: u16 = 0xdddb;
 
     pub mod status_reply {
+
         pub mod host_type {
             pub const CONFIGLESS: u8 = 0b10_0_0_0000;
             pub const CLIENT: u8 = 0b01_0_0_0000;
@@ -33,15 +33,15 @@ pub mod constants {
 
 #[derive(Debug, Clone, Copy)]
 pub enum HostType {
+    Client { calibrated: bool },
     ConfiglessClient,
     Server,
-    Client { calibrated: bool },
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct HostInfo {
-    pub host_type: HostType,
     pub host_state: HostState,
+    pub host_type: HostType,
 }
 
 impl TryInto<u8> for HostInfo {
@@ -113,8 +113,8 @@ pub enum HostState {
     Idle,
 }
 
-#[derive(Clone, Copy)]
 #[must_use]
+#[derive(Clone, Copy)]
 pub enum Command<'a> {
     Ping,
 
@@ -143,6 +143,7 @@ pub enum Command<'a> {
         fov: Option<f64>,
     },
 }
+
 impl Command<'_> {
     pub const PING: u8 = 0x0b;
     pub const CONNECT: u8 = 0xcc;
@@ -193,7 +194,7 @@ impl From<Command<'_>> for Vec<u8> {
 
             Command::ValueUpdate(ClientData {
                 marker_id,
-                target_x_position: value,
+                x_position: value,
             }) => [
                 Command::VALUE_UPDATE.to_be_bytes().as_slice(),
                 marker_id.to_be_bytes().as_slice(),
@@ -256,7 +257,7 @@ impl<'a> TryFrom<&'a [u8]> for Command<'a> {
 
             Command::VALUE_UPDATE => Command::ValueUpdate(ClientData {
                 marker_id: u8::from_be(buf[0]),
-                target_x_position: f64::from_be_bytes(
+                x_position: f64::from_be_bytes(
                     buf[1..size_of::<f64>() + 1].try_into().map_err(|_| ())?,
                 ),
             }),
@@ -312,6 +313,7 @@ impl<'a> TryFrom<&'a [u8]> for Command<'a> {
 
 impl<'a> TryFrom<&'a mut [u8]> for Command<'a> {
     type Error = ();
+
     fn try_from(buf: &'a mut [u8]) -> Result<Self, Self::Error> {
         (&*buf).try_into()
     }
@@ -319,14 +321,15 @@ impl<'a> TryFrom<&'a mut [u8]> for Command<'a> {
 
 #[derive(Clone, Copy)]
 pub struct ClientData {
-    pub target_x_position: f64,
+    pub x_position: f64,
     pub marker_id: u8,
 }
+
 impl ClientData {
-    pub fn new(marker_id: u8, target_x_position: f64) -> ClientData {
+    pub fn new(marker_id: u8, x_position: f64) -> ClientData {
         Self {
+            x_position,
             marker_id,
-            target_x_position,
         }
     }
 }

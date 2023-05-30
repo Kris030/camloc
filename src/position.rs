@@ -1,16 +1,12 @@
-use super::Lerp;
+use crate::Position;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Position {
-    pub x: f64,
-    pub y: f64,
-    pub rotation: f64,
-}
+use super::Lerp;
 
 impl Position {
     pub const fn new(x: f64, y: f64, rotation: f64) -> Self {
         Position { x, y, rotation }
     }
+
     pub fn from_be_bytes(b: &[u8; 24]) -> Self {
         Self::new(
             f64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]),
@@ -18,6 +14,7 @@ impl Position {
             f64::from_be_bytes([b[16], b[17], b[18], b[19], b[20], b[21], b[22], b[23]]),
         )
     }
+
     pub fn to_be_bytes(&self) -> [u8; 24] {
         let x = self.x.to_be_bytes();
         let y = self.y.to_be_bytes();
@@ -29,15 +26,9 @@ impl Position {
     }
 }
 
-impl From<(f64, f64, f64)> for Position {
-    fn from((x, y, rotation): (f64, f64, f64)) -> Self {
-        Self::new(x, y, rotation)
-    }
-}
-
 impl std::fmt::Display for Position {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "({:.2}; {:.2} {:.2}°)", self.x, self.y, self.rotation)
+        write!(f, "({:.2}; {:.2}; {:.2}°)", self.x, self.y, self.rotation)
     }
 }
 
@@ -46,13 +37,17 @@ static CPOS: [(f64, f64); 4] = [(-1., 0.), (0., -1.), (1., 0.), (0., 1.)];
 pub fn calc_posotion_in_square_fov(side_length: f64, index: usize, fov: f64) -> Position {
     debug_assert!(index < 4, "A square setup may only have 2 or 4 cameras");
 
-    let p = &CPOS[index];
-    let d = get_camera_distance_in_square(side_length, fov);
+    let (sign_x, sign_y) = &CPOS[index];
+    let distance = get_camera_distance_in_square(side_length, fov);
 
-    Position::new(p.0 * d, p.1 * d, (index as f64) * 90f64.to_radians())
+    Position::new(
+        sign_x * distance,
+        sign_y * distance,
+        (index as f64) * 90f64.to_radians(),
+    )
 }
 
-pub fn calc_posotion_in_square_distance(index: usize, distance: f64) -> Position {
+pub fn calc_position_in_square_distance(index: usize, distance: f64) -> Position {
     debug_assert!(index < 4, "A square setup may only have 2 or 4 cameras");
 
     let p = &CPOS[index];

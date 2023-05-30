@@ -100,11 +100,13 @@ pub fn find_board(
 pub fn display_image(image: &Mat, title: &str, destroy: bool) -> opencv::Result<()> {
     highgui::imshow(title, image)?;
 
+    // pressed q
     while !matches!(highgui::wait_key(0), Err(_) | Ok(113)) {}
 
     if destroy {
         highgui::destroy_window(title)?;
     }
+
     Ok(())
 }
 
@@ -117,6 +119,7 @@ pub fn draw_board(image: &mut Mat, board: &FoundBoard) -> opencv::Result<()> {
     )?;
     Ok(())
 }
+
 pub fn draw_charuco_board(image: &mut Mat, board: &FoundBoard) -> opencv::Result<()> {
     draw_board(image, board)?;
     if let Some(markers) = &board.markers {
@@ -139,6 +142,7 @@ pub fn calibrate(
         types::VectorOfVectorOfPoint2f::new(),
         types::VectorOfVectorOfi32::new(),
     );
+
     for img in images {
         if let Some(fb) = find_board(img, board, false)? {
             charuco_corners.push(fb.corners);
@@ -237,25 +241,19 @@ impl CameraParams {
         fs.write_mat("optimal_matrix", &self.optimal_matrix)?;
 
         fs.release()?;
+
         Ok(())
     }
 
     pub fn load(filename: &str) -> opencv::Result<Self> {
         let mut fs = FileStorage::new(filename, core::FileStorage_READ, "")?;
 
-        let mut camera_matrix = Mat::default();
-        let mut dist_coeffs = Mat::default();
-        let mut optimal_matrix = Mat::default();
-
-        fs.get("camera_matrix")?
-            .mat()?
-            .copy_to(&mut camera_matrix)?;
-        fs.get("dist_coeffs")?.mat()?.copy_to(&mut dist_coeffs)?;
-        fs.get("optimal_matrix")?
-            .mat()?
-            .copy_to(&mut optimal_matrix)?;
+        let camera_matrix = fs.get("camera_matrix")?.mat()?;
+        let dist_coeffs = fs.get("dist_coeffs")?.mat()?;
+        let optimal_matrix = fs.get("optimal_matrix")?.mat()?;
 
         fs.release()?;
+
         Ok(CameraParams {
             optimal_matrix,
             camera_matrix,
@@ -266,7 +264,7 @@ impl CameraParams {
 
 impl FullCameraInfo {
     pub fn to_be_bytes(&self) -> Vec<u8> {
-        let om = self
+        let optimal_matrix = self
             .params
             .optimal_matrix
             .to_vec_2d::<f64>()
@@ -274,7 +272,8 @@ impl FullCameraInfo {
             .into_iter()
             .flatten()
             .flat_map(f64::to_be_bytes);
-        let cm = self
+
+        let camera_matrix = self
             .params
             .camera_matrix
             .to_vec_2d::<f64>()
@@ -283,10 +282,10 @@ impl FullCameraInfo {
             .flatten()
             .flat_map(f64::to_be_bytes);
 
-        let dclen = (self.params.dist_coeffs.cols() as u8)
+        let dist_coefficients_len = (self.params.dist_coeffs.cols() as u8)
             .to_be_bytes()
             .into_iter();
-        let dc = self
+        let dist_coefficients = self
             .params
             .dist_coeffs
             .iter::<f64>()
@@ -296,7 +295,12 @@ impl FullCameraInfo {
 
         let fov = self.horizontal_fov.to_be_bytes().into_iter();
 
-        dclen.chain(om).chain(cm).chain(dc).chain(fov).collect()
+        dist_coefficients_len
+            .chain(optimal_matrix)
+            .chain(camera_matrix)
+            .chain(dist_coefficients)
+            .chain(fov)
+            .collect()
     }
 
     pub fn from_be_bytes(r: &mut impl std::io::Read) -> Result<Self, std::io::Error> {
@@ -356,16 +360,16 @@ pub struct FullCameraInfo {
 impl Clone for FullCameraInfo {
     fn clone(&self) -> Self {
         Self {
-            params: self.params.clone(),
             horizontal_fov: self.horizontal_fov,
+            params: self.params.clone(),
         }
     }
 }
 
 pub struct FoundBoard {
     corners: types::VectorOfPoint2f,
-    ids: types::VectorOfi32,
     markers: Option<FoundMarkers>,
+    ids: types::VectorOfi32,
 }
 
 pub struct FoundMarkers {
