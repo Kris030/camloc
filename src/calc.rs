@@ -17,18 +17,16 @@ pub struct Setup;
 
 impl Setup {
     pub fn calculate_position(position_data: PositionData) -> Option<Position> {
-        let c = position_data.cameras.len();
-        debug_assert_eq!(c, position_data.client_data.len());
+        let c = position_data.data.len();
 
         let mut tangents = vec![None; c];
 
         let mut lines = 0u32;
         #[allow(clippy::needless_range_loop)]
         for i in 0..c {
-            if let Some(d) = position_data.client_data[i] {
+            if let (Some(data), camera) = position_data.data[i] {
                 tangents[i] = Some(
-                    (position_data.cameras[i].position.rotation
-                        + (position_data.cameras[i].fov * (0.5 - d.target_x_position)))
+                    (camera.position.rotation + (camera.fov * (0.5 - data.target_x_position)))
                         .tan(),
                 );
                 lines += 1;
@@ -46,8 +44,8 @@ impl Setup {
                 let Some(atan) = tangents[i] else { continue; };
                 let Some(btan) = tangents[j] else { continue; };
 
-                let c1 = position_data.cameras[i].position;
-                let c2 = position_data.cameras[j].position;
+                let c1 = position_data.data[i].1.position;
+                let c2 = position_data.data[j].1.position;
 
                 let px = (c1.x * atan - c2.x * btan - c1.y + c2.y) / (atan - btan);
                 let py = atan * (px - c1.x) + c1.y;
@@ -61,12 +59,10 @@ impl Setup {
         let pos_rot = Setup::get_pos_based_rotation(x, y, &position_data);
         // TODO: improve calculation
         let (mut r, mut rc) = (0., 0u64);
-        #[allow(clippy::manual_flatten)]
-        for rot in [comp_rot, pos_rot] {
-            if let Some(cr) = rot {
-                r += cr;
-                rc += 1;
-            }
+
+        for rot in [comp_rot, pos_rot].iter().flatten() {
+            r += rot;
+            rc += 1;
         }
         let r = if rc == 0 { f64::NAN } else { r / rc as f64 };
 
@@ -115,9 +111,8 @@ impl MotionData {
 }
 
 pub struct PositionData<'a> {
-    pub client_data: &'a [Option<ClientData>],
+    pub data: &'a [(Option<ClientData>, PlacedCamera)],
     pub motion_data: Option<MotionData>,
-    pub cameras: &'a [PlacedCamera],
     pub compass_data: Option<f64>,
     pub last_position: Position,
     pub cube: [u8; 4],
@@ -125,17 +120,15 @@ pub struct PositionData<'a> {
 
 impl<'a> PositionData<'a> {
     pub fn new(
-        client_data: &'a [Option<ClientData>],
+        data: &'a [(Option<ClientData>, PlacedCamera)],
         motion_data: Option<MotionData>,
-        cameras: &'a [PlacedCamera],
         compass_data: Option<f64>,
         last_position: Position,
         cube: [u8; 4],
     ) -> Self {
         Self {
+            data,
             cube,
-            cameras,
-            client_data,
             motion_data,
             compass_data,
             last_position,

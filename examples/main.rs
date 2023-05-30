@@ -126,7 +126,7 @@ async fn run() -> Result<(), &'static str> {
             }))
             .await;
 
-        if let Ok(Ok(())) = ctrlc_task.await {
+        if let Err(_) | Ok(Err(_)) = ctrlc_task.await {
             return Err("Something failed in the ctrl+c channel");
         }
 
@@ -141,7 +141,7 @@ async fn run() -> Result<(), &'static str> {
             }
 
             if ctrlc_task.is_finished() {
-                if let Ok(Ok(())) = ctrlc_task.await {
+                if let Err(_) | Ok(Err(_)) = ctrlc_task.await {
                     return Err("Something failed in the ctrl+c channel");
                 }
                 break;

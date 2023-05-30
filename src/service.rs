@@ -39,9 +39,9 @@ impl ClientInfo {
         last_data: TimeValidatedValue<ClientData>,
     ) -> Self {
         Self {
+            last_data,
             address,
             camera,
-            last_data,
         }
     }
 }
@@ -224,36 +224,43 @@ impl<
                 // update value
                 Ok(Command::ValueUpdate(ClientData {
                     marker_id,
-                    target_x_position: value,
+                    target_x_position,
                 })) => {
-                    // TODO: clean up
+                    let received_data = ClientData::new(marker_id, target_x_position);
+                    
+                    // update client data and position if the oldest data was updated
+                    
+                    let (mut oldest_data_age, mut oldest_data_index) = (start_time, 0);
+                    let mut updated_client_index = None;
+                    
+                    let mut data = vec![];
+
                     let mut clients = self.clients.lock().await;
-                    let mut client_index = None;
-                    let (mut min_t, mut min_index) = (start_time, 0);
 
-                    let mut values = vec![None; clients.len()];
-                    for (i, c) in clients.iter().enumerate() {
-                        values[i] = if let Some(data) = c.last_data.get() {
-                            if min_t < c.last_data.last_changed() {
-                                min_t = c.last_data.last_changed();
-                                min_index = i;
-                            }
-                            Some(*data)
-                        } else {
-                            None
-                        };
-                        if c.address == recv_addr {
-                            client_index = Some(i);
+                    for (i, c) in clients.iter_mut().enumerate() {
+                        let data_age = c.last_data.last_changed();
+                        if data_age < oldest_data_age {
+                            oldest_data_age = data_age;
+                            oldest_data_index = i;
                         }
-                    }
-                    if let Some(ci) = client_index {
-                        clients[ci]
-                            .last_data
-                            .set_with_time(ClientData::new(marker_id, value), recv_time);
 
-                        if min_index == ci {
-                            self.update_position(start_time, &clients, &values[..], cube)
-                                .await?;
+                        let client_data = if c.address == recv_addr {
+                            c.last_data.set_with_time(received_data, recv_time);
+                            updated_client_index = Some(i);
+
+                            Some(received_data)
+                        } else {
+                            c.last_data.get().copied()
+                        };
+
+                        data.push((client_data, c.camera));
+                    }
+
+                    // if we had a legit update
+                    if let Some(client_index) = updated_client_index {
+                        // and it was the client that was last updated
+                        if oldest_data_index == client_index {
+                            self.update_position(start_time, &data[..], cube).await?;
                         }
                     }
                 }
@@ -330,8 +337,7 @@ impl<
     async fn update_position(
         self: &Arc<LocationService<E, C, F>>,
         start_time: Instant,
-        clients: &[ClientInfo],
-        pxs: &[Option<ClientData>],
+        data: &[(Option<ClientData>, PlacedCamera)],
         cube: [u8; 4],
     ) -> Result<(), String> {
         let motion_data = self.motion_data.read().await;
@@ -345,16 +351,8 @@ impl<
         drop(compass);
 
         let mut last_pos = self.last_known_pos.write().await;
-        let cameras: Vec<PlacedCamera> = clients.iter().map(|c| c.camera).collect();
 
-        let data = PositionData::new(
-            pxs,
-            *motion_data,
-            &cameras,
-            compass_value,
-            last_pos.position,
-            cube,
-        );
+        let data = PositionData::new(data, *motion_data, compass_value, last_pos.position, cube);
         let Some(position) = Setup::calculate_position(data) else { return Ok(()); };
 
         let calculated_position = TimedPosition {
