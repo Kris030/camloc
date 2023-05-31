@@ -1,13 +1,13 @@
-use camloc_common::{get_from_stdin, yes_no_choice};
+use anyhow::{anyhow, Result};
+use camloc_common::yes_no_choice;
 use camloc_server::{
-    calc::PlacedCamera,
-    compass::serial::SerialCompass,
+    compass::Compass,
     extrapolations::{Extrapolation, LinearExtrapolation},
-    service::{LocationService, Subscriber, TimedPosition},
+    service::{LocationService, Subscriber},
+    PlacedCamera, TimedPosition,
 };
 use std::{net::SocketAddr, time::Duration};
 use tokio::io::{stderr, AsyncWriteExt};
-use tokio_serial::{SerialPortBuilderExt, SerialPortType};
 
 fn main() {
     if let Err(e) = run() {
@@ -17,14 +17,17 @@ fn main() {
     }
 }
 
-fn get_compass() -> Result<Option<SerialCompass>, &'static str> {
+#[cfg(feature = "serial-compass")]
+fn get_compass() -> Result<Option<Box<dyn Compass + Send>>> {
+    use camloc_common::get_from_stdin;
+    use camloc_server::compass::serial::SerialCompass;
+    use tokio_serial::{SerialPortBuilderExt, SerialPortType};
+
     if !yes_no_choice("Do you want to use a microbit compass?", false) {
         return Ok(None);
     }
 
-    let devices = if let Ok(ps) = tokio_serial::available_ports() {
-        ps
-    } else {
+    let Ok(devices) = tokio_serial::available_ports() else {
         println!("  Couldn't get available serial devices");
         return Ok(None);
     };
@@ -69,25 +72,25 @@ fn get_compass() -> Result<Option<SerialCompass>, &'static str> {
         .map(|p| SerialCompass::start(p, offset as f64));
 
     if let Ok(Ok(p)) = p {
-        Ok(Some(p))
+        Ok(Some(Box::new(p)))
     } else {
-        Err("Couldn't open serial port")
+        Err(anyhow!("Couldn't open serial port"))
     }
 }
 
 #[tokio::main]
-async fn run() -> Result<(), &'static str> {
-    let compass = Box::leak(get_compass()?.into());
-    let mut location_service = LocationService::start(
-        Some(Extrapolation::<LinearExtrapolation>::new(
+async fn run() -> Result<()> {
+    let location_service = LocationService::start(
+        Some(Extrapolation::new::<LinearExtrapolation>(
             Duration::from_millis(500),
         )),
         // no_extrapolation!(),
         camloc_common::hosts::constants::MAIN_PORT,
-        compass
-            .as_mut()
-            .map(|compass| || async { compass.get_value().await }),
-        // no_compass!(),
+        #[cfg(feature = "serial-compass")]
+        get_compass()?,
+        #[cfg(not(feature = "serial-compass"))]
+        camloc_server::compass::no_compass!(),
+        Duration::from_millis(500),
     )
     .await?;
 
@@ -95,21 +98,13 @@ async fn run() -> Result<(), &'static str> {
         .subscribe(Subscriber::Connection(|address, camera| {
             let address = address.to_string();
             println!("New camera connected from {address}");
-            Box::pin(async move {
-                on_connect(address, camera)
-                    .await
-                    .map_err(|_| "Couldn't send camera")
-            })
+            Box::pin(async move { Ok(on_connect(address, camera).await?) })
         }))
         .await;
 
     location_service
         .subscribe(Subscriber::Disconnection(|c, _| {
-            Box::pin(async move {
-                on_disconnect(c)
-                    .await
-                    .map_err(|_| "Couldn't send camera connection")
-            })
+            Box::pin(async move { Ok(on_disconnect(c).await?) })
         }))
         .await;
 
@@ -118,37 +113,28 @@ async fn run() -> Result<(), &'static str> {
     if yes_no_choice("Subscription or query mode?", true) {
         location_service
             .subscribe(Subscriber::Position(|p| {
-                Box::pin(async move {
-                    on_position(p)
-                        .await
-                        .map_err(|_| "Couldn't send camera connection")
-                })
+                Box::pin(async move { Ok(on_position(p).await?) })
             }))
             .await;
-
-        if let Err(_) | Ok(Err(_)) = ctrlc_task.await {
-            return Err("Something failed in the ctrl+c channel");
-        }
-
-        location_service.stop().await;
     } else {
         let mut interval = tokio::time::interval(Duration::from_millis(50));
         loop {
             if let Some(p) = location_service.get_position().await {
-                on_position(p).await.map_err(|_| "Couldn't send position")?;
+                on_position(p).await?;
             } else {
                 println!("Couldn't get position");
             }
 
             if ctrlc_task.is_finished() {
-                if let Err(_) | Ok(Err(_)) = ctrlc_task.await {
-                    return Err("Something failed in the ctrl+c channel");
-                }
                 break;
             }
 
             interval.tick().await;
         }
+    }
+
+    if let Err(_) | Ok(Err(_)) = ctrlc_task.await {
+        return Err(anyhow!("Something failed in the ctrl+c channel"));
     }
 
     Ok(())

@@ -1,5 +1,5 @@
-use crate::service::TimedPosition;
-use camloc_common::{position::Position, Lerp};
+use crate::TimedPosition;
+use camloc_common::{Lerp, Position};
 use std::time::{Duration, Instant};
 
 #[macro_export]
@@ -16,15 +16,15 @@ pub trait Extrapolator: Send + Sync {
     fn extrapolate(&self, time: Instant) -> Option<Position>;
 }
 
-pub struct Extrapolation<E: Extrapolator> {
-    pub extrapolator: E,
+pub struct Extrapolation {
+    pub extrapolator: Box<dyn Extrapolator>,
     pub invalidate_after: Duration,
 }
 
-impl<E: Extrapolator + Default> Extrapolation<E> {
-    pub fn new(invalidate_after: Duration) -> Self {
+impl Extrapolation {
+    pub fn new<E: Extrapolator + Default + 'static>(invalidate_after: Duration) -> Self {
         Extrapolation {
-            extrapolator: E::default(),
+            extrapolator: Box::<E>::default(),
             invalidate_after,
         }
     }

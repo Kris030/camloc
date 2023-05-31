@@ -1,20 +1,20 @@
 [package]
-name = "camloc_server"
-version = "0.1.0"
+name = "camloc-server"
+version = "1.0.0"
+authors = ["Kris030"]
 edition = "2021"
+description = "A DIY GPS for a dank engine."
+repository = "https://github.com/Kris030/camloc-server"
+exclude = ["test/"]
 
 [dependencies]
-# TODO: camloc_common = { git = "https://github.com/Kris030/camloc_common" }
-camloc_common = { path = "../common" }
-futures = "0.3.28"
-tokio = { version = "1.28.0", features = ["full"] }
-tokio-serial = { version = "5.4.4", optional = true, features = ["libudev"] }
+tokio-serial = { version = "5.4", optional = true, features = ["libudev"] }
+camloc-common = { git = "https://github.com/Kris030/camloc-common" }
+tokio = { version = "1.28", features = ["full"] }
+anyhow = "1.0.71"
+futures = "0.3"
 
 [features]
 default = []
 all = ["serial-compass"]
 serial-compass = ["dep:tokio-serial"]
-
-[[example]]
-name = "main"
-required-features = ["serial-compass"]

@@ -1,12 +1,11 @@
+use anyhow::Result;
 use camloc_common::{
     hosts::{ClientData, Command, HostInfo, HostState, HostType},
-    position::Position,
-    TimeValidatedValue,
+    Position, TimeValidated,
 };
 use futures::future::try_join_all;
 use std::{
     f64::NAN,
-    fmt::{Debug, Display},
     future::Future,
     net::SocketAddr,
     pin::Pin,
@@ -21,14 +20,14 @@ use tokio::{
 };
 
 use crate::{
-    calc::{MotionData, MotionHint, PlacedCamera, PositionData, Setup},
-    extrapolations::{Extrapolation, Extrapolator},
+    calc::{calculate_position, MotionData, PositionData},
+    compass::Compass,
+    extrapolations::Extrapolation,
+    MotionHint, PlacedCamera, TimedPosition,
 };
 
-static DATA_VALIDITY: Duration = Duration::from_millis(500);
-
 struct ClientInfo {
-    last_data: TimeValidatedValue<ClientData>,
+    last_data: TimeValidated<ClientData>,
     camera: PlacedCamera,
     address: SocketAddr,
 }
@@ -36,7 +35,7 @@ impl ClientInfo {
     fn new(
         address: SocketAddr,
         camera: PlacedCamera,
-        last_data: TimeValidatedValue<ClientData>,
+        last_data: TimeValidated<ClientData>,
     ) -> Self {
         Self {
             last_data,
@@ -46,110 +45,118 @@ impl ClientInfo {
     }
 }
 
-type RetFuture<T = Result<(), &'static str>> = Pin<Box<dyn Future<Output = T> + Send>>;
+type RetFuture<T = Result<()>> = Pin<Box<dyn Future<Output = T> + Send>>;
 
 pub enum Subscriber {
     Connection(fn(SocketAddr, PlacedCamera) -> RetFuture),
     Disconnection(fn(SocketAddr, PlacedCamera) -> RetFuture),
     Position(fn(TimedPosition) -> RetFuture),
+    InfoUpdate(fn(SocketAddr, PlacedCamera) -> RetFuture),
 }
 
-/// TODO: revert to dyn because runtime changeing?
-pub struct LocationService<
-    E: Send + Extrapolator,
-    C: FnMut() -> F,
-    F: Future<Output = Option<f64>> + Send,
-> {
+macro_rules! notify_subscribers {
+    ($self:expr, $subscriber_type:path, $($args:expr),* $(,)?) => {
+        {
+            let subs = $self.subscriptions.read().await;
+            try_join_all(subs.iter().filter_map(|s| {
+                if let $subscriber_type(func) = s {
+                    Some(func($($args),*))
+                } else {
+                    None
+                }
+            }))
+            .await?
+        }
+    };
+}
+
+pub struct LocationService {
+    extrap: RwLock<Option<Extrapolation>>,
     motion_data: RwLock<Option<MotionData>>,
     subscriptions: RwLock<Vec<Subscriber>>,
-    extrap: RwLock<Option<Extrapolation<E>>>,
     last_known_pos: RwLock<TimedPosition>,
-    compass: RwLock<Option<C>>,
     clients: Mutex<Vec<ClientInfo>>,
     start_time: RwLock<Instant>,
+    compass: Mutex<Option<Box<dyn Compass + Send>>>,
     running: RwLock<bool>,
 }
 
-pub struct LocationServiceHandle<
-    E: Send + Extrapolator,
-    C: FnMut() -> F,
-    F: Future<Output = Option<f64>> + Send,
-> {
-    handle: Option<JoinHandle<Result<(), String>>>,
-    service: Arc<LocationService<E, C, F>>,
+pub struct LocationServiceHandle {
+    service_task_handle: Option<JoinHandle<Result<()>>>,
+    service_handle: Arc<LocationService>,
 }
 
-impl<E: Send + Extrapolator, C: FnMut() -> F, F: Future<Output = Option<f64>> + Send> Drop
-    for LocationServiceHandle<E, C, F>
-{
+impl Drop for LocationServiceHandle {
     fn drop(&mut self) {
-        let handle = self.handle.take().expect("Handle should always be Some");
+        let handle = self
+            .service_task_handle
+            .take()
+            .expect("Service task handle should always be Some");
 
-        let r = self.service.running.write();
+        let running = self.service_handle.running.write();
         let res = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
-                let mut r = r.await;
-                *r = false;
-                drop(r);
+                let mut running = running.await;
+                *running = false;
+                drop(running);
 
-                handle.await
+                handle.await.is_ok()
             })
         });
 
-        res.expect("Should always be able join the task").unwrap();
+        if !res {
+            panic!("Should always be able join the task");
+        }
     }
 }
 
-impl<
-        E: Send + Sync + Extrapolator + 'static,
-        C: 'static + Send + Sync + FnMut() -> F,
-        F: 'static + Future<Output = Option<f64>> + Send + Sync,
-    > LocationService<E, C, F>
-{
+impl LocationService {
     pub async fn start(
-        extrapolation: Option<Extrapolation<E>>,
+        extrapolation: Option<Extrapolation>,
         port: u16,
-        compass: Option<C>,
-    ) -> Result<LocationServiceHandle<E, C, F>, &'static str> {
+        compass: Option<Box<dyn Compass + Send>>,
+        data_validity: Duration,
+    ) -> Result<LocationServiceHandle> {
         let start_time = Instant::now();
 
-        let udp_socket = UdpSocket::bind(("0.0.0.0", port))
-            .await
-            .map_err(|_| "Couldn't create socket")?;
+        let udp_socket = UdpSocket::bind(("0.0.0.0", port)).await?;
 
         let instance = LocationService {
             last_known_pos: TimedPosition {
-                start_time,
-                time: start_time,
                 position: Position::new(NAN, NAN, NAN),
-                interpolated: None,
+                extrapolated_by: None,
+                time: start_time,
+                start_time,
             }
             .into(),
-            subscriptions: vec![].into(),
             start_time: start_time.into(),
+            subscriptions: vec![].into(),
             extrap: extrapolation.into(),
-            compass: compass.into(),
             motion_data: None.into(),
+            compass: Mutex::new(compass),
             clients: vec![].into(),
             running: true.into(),
         };
 
-        let arc = Arc::new(instance);
-        let ret = arc.clone();
-
-        let handle = spawn(arc.run(udp_socket, start_time));
+        let service_handle = Arc::new(instance);
+        let service_task_handle = Some(spawn(service_handle.clone().run(
+            udp_socket,
+            start_time,
+            data_validity,
+        )));
 
         Ok(LocationServiceHandle {
-            handle: Some(handle),
-            service: ret,
+            service_task_handle,
+            service_handle,
         })
     }
 
     async fn run(
-        self: Arc<LocationService<E, C, F>>,
+        self: Arc<Self>,
         udp_socket: UdpSocket,
         start_time: Instant,
-    ) -> Result<(), String> {
+        data_validity: Duration,
+    ) -> Result<()> {
         let mut buf = [0u8; 64];
 
         let (cube, _organizer) = loop {
@@ -165,7 +172,7 @@ impl<
 			).await else {
 				continue;
 			};
-            let (len, addr) = recv_result.map_err(|_| "Error while recieving")?;
+            let (len, addr) = recv_result?;
 
             match buf[..len].try_into() {
                 Ok(Command::StartServer { cube }) => break (cube, addr),
@@ -180,8 +187,7 @@ impl<
                             .unwrap()],
                             addr,
                         )
-                        .await
-                        .map_err(|_| "Error while sending")?;
+                        .await?;
                 }
                 _ => (),
             }
@@ -200,7 +206,7 @@ impl<
 			).await else {
 				continue;
 			};
-            let (recv_len, recv_addr) = recv_result.map_err(|_| "Error while recieving")?;
+            let (recv_len, recv_addr) = recv_result?;
 
             let recv_time = Instant::now();
 
@@ -217,22 +223,21 @@ impl<
                             .unwrap()],
                             recv_addr,
                         )
-                        .await
-                        .map_err(|_| "Error while sending")?;
+                        .await?;
                 }
 
                 // update value
                 Ok(Command::ValueUpdate(ClientData {
                     marker_id,
-                    target_x_position,
+                    x_position,
                 })) => {
-                    let received_data = ClientData::new(marker_id, target_x_position);
-                    
+                    let received_data = ClientData::new(marker_id, x_position);
+
                     // update client data and position if the oldest data was updated
-                    
+
                     let (mut oldest_data_age, mut oldest_data_index) = (start_time, 0);
                     let mut updated_client_index = None;
-                    
+
                     let mut data = vec![];
 
                     let mut clients = self.clients.lock().await;
@@ -255,38 +260,32 @@ impl<
 
                         data.push((client_data, c.camera));
                     }
+                    drop(clients);
 
                     // if we had a legit update
                     if let Some(client_index) = updated_client_index {
                         // and it was the client that was last updated
                         if oldest_data_index == client_index {
-                            self.update_position(start_time, &data[..], cube).await?;
+                            self.update_position(start_time, recv_time, &data[..], cube)
+                                .await?;
                         }
                     }
                 }
 
                 // connection request
                 Ok(Command::Connect { position, fov }) => {
-                    // TODO: do it better?
                     let camera = PlacedCamera::new(position, fov);
                     self.clients.lock().await.push(ClientInfo::new(
                         recv_addr,
                         camera,
-                        TimeValidatedValue::new_with_change(
+                        TimeValidated::new_with_change(
                             ClientData::new(255, NAN),
-                            DATA_VALIDITY,
-                            recv_time - DATA_VALIDITY,
+                            data_validity,
+                            recv_time - data_validity,
                         ),
                     ));
 
-                    try_join_all(self.subscriptions.read().await.iter().filter_map(|s| {
-                        if let Subscriber::Connection(s) = s {
-                            Some(s(recv_addr, camera))
-                        } else {
-                            None
-                        }
-                    }))
-                    .await?;
+                    notify_subscribers!(self, Subscriber::Connection, recv_addr, camera);
                 }
 
                 Ok(Command::InfoUpdate {
@@ -301,6 +300,8 @@ impl<
                             if let Some(fov) = fov {
                                 c.camera.fov = fov;
                             }
+
+                            notify_subscribers!(self, Subscriber::InfoUpdate, c.address, c.camera);
                             break;
                         }
                     }
@@ -313,6 +314,12 @@ impl<
                     for i in 0..clients.len() {
                         if clients[i].address == recv_addr {
                             clients.remove(i);
+                            notify_subscribers!(
+                                self,
+                                Subscriber::Disconnection,
+                                clients[i].address,
+                                clients[i].camera,
+                            );
                             break;
                         }
                     }
@@ -322,29 +329,30 @@ impl<
             }
         }
 
-        try_join_all(self.clients.lock().await.iter().map(|c| async {
-            udp_socket
-                .send_to(&[Command::STOP], c.address)
+        try_join_all(
+            self.clients
+                .lock()
                 .await
-                .map_err(|_| "Couldn't tell all clients to stop")?;
-            Ok::<(), &'static str>(())
-        }))
+                .iter()
+                .map(|c| async { udp_socket.send_to(&[Command::STOP], c.address).await }),
+        )
         .await?;
 
         Ok(())
     }
 
     async fn update_position(
-        self: &Arc<LocationService<E, C, F>>,
+        self: &Arc<Self>,
         start_time: Instant,
+        recv_time: Instant,
         data: &[(Option<ClientData>, PlacedCamera)],
         cube: [u8; 4],
-    ) -> Result<(), String> {
-        let motion_data = self.motion_data.read().await;
+    ) -> Result<()> {
+        let motion_data = *self.motion_data.read().await;
 
-        let mut compass = self.compass.write().await;
+        let mut compass = self.compass.lock().await;
         let compass_value = if let Some(compass) = &mut *compass {
-            compass().await
+            compass.get_value()
         } else {
             None
         };
@@ -352,14 +360,14 @@ impl<
 
         let mut last_pos = self.last_known_pos.write().await;
 
-        let data = PositionData::new(data, *motion_data, compass_value, last_pos.position, cube);
-        let Some(position) = Setup::calculate_position(data) else { return Ok(()); };
+        let data = PositionData::new(data, motion_data, compass_value, last_pos.position, cube);
+        let Some(position) = calculate_position(&data) else { return Ok(()); };
 
         let calculated_position = TimedPosition {
             position,
             start_time,
-            time: Instant::now(),
-            interpolated: None,
+            time: recv_time,
+            extrapolated_by: None,
         };
 
         *last_pos = calculated_position;
@@ -369,26 +377,17 @@ impl<
             ex.extrapolator.add_datapoint(calculated_position);
         };
 
-        try_join_all(self.subscriptions.read().await.iter().filter_map(|s| {
-            if let Subscriber::Position(s) = s {
-                Some(s(calculated_position))
-            } else {
-                None
-            }
-        }))
-        .await?;
+        notify_subscribers!(self, Subscriber::Position, calculated_position);
 
         Ok(())
     }
 }
 
-impl<E: Send + Extrapolator, C: FnMut() -> F, F: Future<Output = Option<f64>> + Send>
-    LocationServiceHandle<E, C, F>
-{
-    pub async fn set_motion_hint(&mut self, hint: Option<MotionHint>) {
-        *self.service.motion_data.write().await = if let Some(hint) = hint {
+impl LocationServiceHandle {
+    pub async fn set_motion_hint(&self, hint: Option<MotionHint>) {
+        *self.service_handle.motion_data.write().await = if let Some(hint) = hint {
             Some(MotionData::new(
-                self.service.last_known_pos.read().await.position,
+                self.service_handle.last_known_pos.read().await.position,
                 hint,
             ))
         } else {
@@ -396,24 +395,28 @@ impl<E: Send + Extrapolator, C: FnMut() -> F, F: Future<Output = Option<f64>> + 
         };
     }
 
-    pub async fn subscribe(&mut self, action: Subscriber) {
-        self.service.subscriptions.write().await.push(action);
+    pub async fn subscribe(&self, action: Subscriber) {
+        self.service_handle.subscriptions.write().await.push(action);
+    }
+
+    pub async fn modify_subscriptions(&self, action: impl FnOnce(&mut Vec<Subscriber>)) {
+        action(&mut *self.service_handle.subscriptions.write().await);
     }
 
     pub async fn get_position(&self) -> Option<TimedPosition> {
-        if !*(self.service.running.read().await) {
+        if !*(self.service_handle.running.read().await) {
             return None;
         }
 
-        let pos = self.service.last_known_pos.read().await;
+        let pos = *self.service_handle.last_known_pos.read().await;
         if pos.position.x.is_nan() || pos.position.y.is_nan() {
             return None;
         }
 
-        let start_time = self.service.start_time.read().await;
+        let start_time = *self.service_handle.start_time.read().await;
         let now = Instant::now();
 
-        let ex = self.service.extrap.read().await;
+        let ex = self.service_handle.extrap.read().await;
         if let Some(x) = &*ex {
             if now > pos.time + x.invalidate_after {
                 return None;
@@ -423,43 +426,33 @@ impl<E: Send + Extrapolator, C: FnMut() -> F, F: Future<Output = Option<f64>> + 
                 .extrapolate(now)
                 .map(|extrapolated| TimedPosition {
                     position: extrapolated,
-                    start_time: *start_time,
+                    start_time,
                     time: now,
-                    interpolated: x.extrapolator.get_last_datapoint().map(|p| now - p.time),
+                    extrapolated_by: x.extrapolator.get_last_datapoint().map(|p| now - p.time),
                 })
         } else {
-            Some(*pos)
+            Some(pos)
         }
     }
 
-    pub async fn stop(self) {
+    pub fn stop(self) {
         drop(self)
     }
+
     pub async fn is_running(&self) -> bool {
-        *self.service.running.read().await
+        *self.service_handle.running.read().await
     }
-}
 
-#[derive(Debug, Clone, Copy)]
-pub struct TimedPosition {
-    pub position: Position,
-    start_time: Instant,
-    pub time: Instant,
+    pub async fn set_extrapolation(&self, extrapolation: Option<Extrapolation>) {
+        let mut ex = self.service_handle.extrap.write().await;
+        *ex = extrapolation;
+    }
 
-    /// - None - not interpolated
-    /// - Some(d) - interpolated by d time
-    pub interpolated: Option<Duration>,
-}
-
-impl Display for TimedPosition {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let pos = &self.position;
-        let t = self.time - self.start_time;
-
-        if let Some(from) = self.interpolated {
-            write!(f, "[{pos} @ {from:.2?} -> {t:.2?}]")
-        } else {
-            write!(f, "[{pos} @ {t:.2?}]")
+    pub async fn set_compass(&self, compass: Option<Box<dyn Compass + Send>>) {
+        let mut comp = self.service_handle.compass.lock().await;
+        if let Some(comp) = comp.as_mut() {
+            comp.stop();
         }
+        *comp = compass;
     }
 }
