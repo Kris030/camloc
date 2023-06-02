@@ -1,11 +1,12 @@
 [package]
-name = "camloc_client"
-version = "0.1.0"
+name = "camloc-client"
+version = "1.0.0"
+authors = ["danipatko", "Kris030"]
 edition = "2021"
+description = "A DIY camera client for a DIY GPS for a dank engine."
+repository = "https://github.com/Kris030/camloc-client"
 
 [dependencies]
-# TODO: camloc_common = { git = "https://github.com/Kris030/camloc_common", features = ["cv"] }
-camloc_common = { path = "../common", features = ["cv"] }
+camloc-common = { git = "https://github.com/Kris030/camloc-common", features = ["cv"] }
 clap = { version = "4.3.0", features = ["derive"] }
-opencv = "0.82.0"
-ctrlc = "3.3.1"
+ctrlc = "3.4"

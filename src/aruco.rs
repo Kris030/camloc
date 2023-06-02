@@ -1,4 +1,4 @@
-use opencv::{
+use camloc_common::opencv::{
     core::{self, Ptr, Rect},
     objdetect,
     prelude::*,
@@ -82,7 +82,7 @@ impl Detector {
 
         Ok(Some(ClientData {
             marker_id,
-            target_x_position: util::relative_x(frame, center),
+            x_position: util::relative_x(frame, center),
         }))
     }
 }
@@ -146,7 +146,7 @@ pub struct Aruco {
     tracked_object: Option<ClientData>,
     detector: Detector,
     tracker: Tracker,
-    // TODO: sanity checks
+    // THINKME: sanity checks
 }
 
 impl Aruco {
@@ -166,7 +166,7 @@ impl Aruco {
         self.tracked_object = if let Some(ClientData { marker_id, .. }) = self.tracked_object {
             self.tracker.track(frame, draw)?.map(|x| ClientData {
                 marker_id,
-                target_x_position: x,
+                x_position: x,
             })
         } else {
             let res = self

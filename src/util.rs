@@ -1,4 +1,4 @@
-use opencv::{core, imgproc, prelude::*, types};
+use camloc_common::opencv::{self, core, imgproc, prelude::*, types};
 
 #[allow(dead_code)]
 pub enum Color {
