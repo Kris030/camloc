@@ -1,5 +1,6 @@
-use crate::Host;
 use camloc_common::hosts::{HostInfo, HostState, HostType};
+
+use crate::Host;
 
 pub(crate) fn get_server(hosts: &mut [Host]) -> Result<&mut Host, usize> {
     let mut si = Err(0);

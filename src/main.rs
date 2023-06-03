@@ -1,17 +1,18 @@
 mod scanning;
 mod utils;
 
+use anyhow::{anyhow, Result};
 use camloc_common::{
     choice,
     cv::{self, display_image},
     get_from_stdin,
     hosts::constants::MAIN_PORT,
     hosts::{constants::ORGANIZER_STARTER_PORT, Command, HostInfo, HostState, HostType},
-    position::{calc_posotion_in_square_distance, get_camera_distance_in_square, Position},
-    yes_no_choice,
+    position::{calc_position_in_square_distance, get_camera_distance_in_square},
+    yes_no_choice, Position,
 };
 use network_interface::{Addr, NetworkInterface, NetworkInterfaceConfig};
-use opencv::{core, imgcodecs, prelude::*};
+use camloc_common::opencv::{self, core, imgcodecs, prelude::*};
 use scanning::IPV4AddressTemplate;
 use std::{
     io::{Read, Write},
@@ -42,8 +43,8 @@ impl std::fmt::Display for Host {
     }
 }
 
-fn get_own_ip() -> Result<Addr, String> {
-    let nis = NetworkInterface::show().map_err(|_| "Couldn't get network interfaces")?;
+fn get_own_ip() -> Result<Addr> {
+    let nis = NetworkInterface::show()?;
     let mut rnis = vec![];
     println!("Interfaces and addresses:");
     let mut ai = 0;
@@ -63,7 +64,7 @@ fn get_own_ip() -> Result<Addr, String> {
 
     let ai: usize = get_from_stdin("\nEnter ip index: ")?;
 
-    rnis.get(ai).copied().ok_or("Invalid index".to_string())
+    rnis.get(ai).copied().ok_or(anyhow!("Invalid index"))
 }
 
 enum SetupType {
@@ -72,10 +73,10 @@ enum SetupType {
 }
 
 impl SetupType {
-    fn select_camera_position(&self, fov: f64) -> Result<Position, &'static str> {
+    fn select_camera_position(&self, fov: f64) -> Result<Position> {
         println!("Enter camera position");
         Ok(match self {
-            SetupType::Square { side_length } => calc_posotion_in_square_distance(
+            SetupType::Square { side_length } => calc_position_in_square_distance(
                 get_from_stdin("  Camera index: ")?,
                 get_camera_distance_in_square(*side_length, fov),
             ),
@@ -88,7 +89,7 @@ impl SetupType {
     }
 }
 
-fn get_setup_type() -> Result<SetupType, &'static str> {
+fn get_setup_type() -> Result<SetupType> {
     match choice(
         [("Square", true), ("Free", true)].into_iter(),
         Some("Select setup type: "),
@@ -99,11 +100,11 @@ fn get_setup_type() -> Result<SetupType, &'static str> {
         }),
 
         1 => Ok(SetupType::Free),
-        _ => Err("Invalid index"),
+        _ => Err(anyhow!("Invalid index")),
     }
 }
 
-fn main() -> Result<(), String> {
+fn main() -> Result<()> {
     let args = {
         use clap::Parser;
 
@@ -123,9 +124,8 @@ fn main() -> Result<(), String> {
     println!("Selected {}\n", own_ip.ip());
 
     let hosts = &mut vec![];
-    let sock = UdpSocket::bind(("0.0.0.0", 0)).map_err(|_| "Couldn't create socket")?;
-    let server_sock = TcpListener::bind(("0.0.0.0", ORGANIZER_STARTER_PORT))
-        .map_err(|_| "Couldn't create socket")?;
+    let sock = UdpSocket::bind(("0.0.0.0", 0))?;
+    let server_sock = TcpListener::bind(("0.0.0.0", ORGANIZER_STARTER_PORT))?;
 
     let mut organizer = Organizer {
         buffer: &mut [0; 2048],
@@ -152,7 +152,7 @@ struct Organizer<'a, 'b, const BUFFER_SIZE: usize> {
 }
 
 impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
-    fn handle_commands(&mut self) -> Result<(), String> {
+    fn handle_commands(&mut self) -> Result<()> {
         let server = match utils::get_server(&mut *self.hosts) {
             Ok(s) => s,
             Err(count) => {
@@ -166,12 +166,10 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
                 return Ok(());
             }
 
-            self.sock
-                .send_to(
-                    &Into::<Vec<u8>>::into(Command::StartServer { cube: self.cube }),
-                    (server.ip, MAIN_PORT),
-                )
-                .map_err(|_| "Couldn't start server")?;
+            self.sock.send_to(
+                &Into::<Vec<u8>>::into(Command::StartServer { cube: self.cube }),
+                (server.ip, MAIN_PORT),
+            )?;
 
             return Ok(());
         }
@@ -261,16 +259,14 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
                     None
                 };
 
-                self.sock
-                    .send_to(
-                        &Into::<Vec<u8>>::into(Command::InfoUpdate {
-                            client_ip: &self.hosts[host_index].ip.to_string(),
-                            position,
-                            fov,
-                        }),
-                        (server_ip, MAIN_PORT),
-                    )
-                    .map_err(|_| "Couldn't send client info update to server")?;
+                self.sock.send_to(
+                    &Into::<Vec<u8>>::into(Command::InfoUpdate {
+                        client_ip: &self.hosts[host_index].ip.to_string(),
+                        position,
+                        fov,
+                    }),
+                    (server_ip, MAIN_PORT),
+                )?;
             }
             Quit => {
                 println!("Quitting...");
@@ -281,7 +277,7 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
         Ok(())
     }
 
-    fn start_host(&mut self, server: &str) -> Result<(), String> {
+    fn start_host(&mut self, server: &str) -> Result<()> {
         let options: Vec<(&Host, bool)> = self
             .hosts
             .iter()
@@ -309,16 +305,11 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
         )?;
         let addr = ((self.hosts[host_index]).ip, MAIN_PORT);
 
-        self.sock
-            .send_to(&[Command::START], addr)
-            .map_err(|_| "Couldn't send client start")?;
+        self.sock.send_to(&[Command::START], addr)?;
 
         // wait for connection on the serversocket
         let mut s = loop {
-            let (s, a) = self
-                .server_sock
-                .accept()
-                .map_err(|_| "Couldn't accept connection")?;
+            let (s, a) = self.server_sock.accept()?;
             if addr.0 == a.ip() {
                 break s;
             }
@@ -344,31 +335,24 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
             let width: u8 = get_from_stdin("  Charuco board width: ")?;
             let height: u8 = get_from_stdin("  Charuco board height: ")?;
 
-            Some((
-                cv::generate_board(width, height).map_err(|_| "Couldn't create charuco board")?,
-                vec![],
-            ))
+            Some((cv::generate_board(width, height)?, vec![]))
         } else {
             println!("Starting image stream");
             None
         };
 
         loop {
-            s.write_all(&[Command::REQUEST_IMAGE])
-                .map_err(|_| "Couldn't request image")?;
+            s.write_all(&[Command::REQUEST_IMAGE])?;
 
             let img = self.get_image(&mut s)?;
 
             if let Some((board, imgs)) = &mut uncalibrated {
-                let detection =
-                    cv::find_board(&img, board, false).map_err(|_| "Couldn't find board")?;
+                let detection = cv::find_board(&img, board, false)?;
 
                 if let Some(fb) = detection {
                     let mut drawn_boards = img.clone();
-                    cv::draw_board(&mut drawn_boards, &fb)
-                        .map_err(|_| "Couldn't draw detected boards")?;
-                    display_image(&drawn_boards, "recieved", true)
-                        .map_err(|_| "Couldn't display image")?;
+                    cv::draw_board(&mut drawn_boards, &fb)?;
+                    display_image(&drawn_boards, "recieved", true)?;
 
                     let keep =
                         get_from_stdin::<String>("  Keep image? (y) ")?.to_lowercase() == "y";
@@ -381,12 +365,12 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
                         continue;
                     }
                 } else {
-                    display_image(&img, "recieved", true).map_err(|_| "Couldn't display image")?;
+                    display_image(&img, "recieved", true)?;
 
                     print!("  Board not found\n  ");
                 }
             } else {
-                display_image(&img, "recieved", true).map_err(|_| "Couldn't display image")?;
+                display_image(&img, "recieved", true)?;
             }
 
             let more = get_from_stdin::<String>("  Continue? (y) ")?.to_lowercase() == "y";
@@ -395,19 +379,13 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
                 break;
             }
         }
-        s.write_all(&[Command::IMAGES_DONE])
-            .map_err(|_| "Couldn't send images done")?;
+        s.write_all(&[Command::IMAGES_DONE])?;
 
         let ip_bytes = server.as_bytes();
         let ip_len = ip_bytes.len() as u16;
 
         let (pos, calib) = if let Some((board, images)) = &uncalibrated {
-            let calib = cv::calibrate(
-                board,
-                images,
-                images[0].size().map_err(|_| "Couldn't get image size??")?,
-            )
-            .map_err(|_| "Couldn't calibrate")?;
+            let calib = cv::calibrate(board, images, images[0].size()?)?;
 
             let pos = self
                 .setup_type
@@ -416,35 +394,27 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
             (pos, Some(calib))
         } else {
             let fov = &mut self.buffer[..size_of::<f64>()];
-            s.read_exact(fov)
-                .map_err(|_| "Couldn't get fov from calibrated client")?;
-            let fov = f64::from_be_bytes(fov.try_into().unwrap());
+            s.read_exact(fov)?;
+            let fov = f64::from_be_bytes(fov.try_into()?);
             (self.setup_type.select_camera_position(fov)?, None)
         };
 
-        s.write_all(pos.x.to_be_bytes().as_slice())
-            .map_err(|_| "Couldn't write x")?;
-        s.write_all(pos.y.to_be_bytes().as_slice())
-            .map_err(|_| "Couldn't write y")?;
-        s.write_all(pos.rotation.to_be_bytes().as_slice())
-            .map_err(|_| "Couldn't write rotation")?;
-        s.write_all(ip_len.to_be_bytes().as_slice())
-            .map_err(|_| "Couldn't write ip len")?;
-        s.write_all(ip_bytes)
-            .map_err(|_| "Couldn't write ip bytes")?;
+        s.write_all(pos.x.to_be_bytes().as_slice())?;
+        s.write_all(pos.y.to_be_bytes().as_slice())?;
+        s.write_all(pos.rotation.to_be_bytes().as_slice())?;
+        s.write_all(ip_len.to_be_bytes().as_slice())?;
+        s.write_all(ip_bytes)?;
 
         if let Some(calib) = calib {
-            s.write_all(calib.to_be_bytes().as_slice())
-                .map_err(|_| "Couldn't write calibration")?;
+            s.write_all(calib.to_be_bytes().as_slice())?;
         }
 
-        s.write_all(&self.cube.map(u8::to_be))
-            .map_err(|_| "Couldn't write cube info")?;
+        s.write_all(&self.cube.map(u8::to_be))?;
 
         Ok(())
     }
 
-    fn stop_host(&mut self) -> Result<(), String> {
+    fn stop_host(&mut self) -> Result<()> {
         let options = self.hosts.iter().map(|s| {
             (s, {
                 matches!(
@@ -460,16 +430,14 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
         let host = choice(options, Some("\nSelect client to start: "), None)?;
 
         let addr = (self.hosts[host].ip, MAIN_PORT);
-        self.sock
-            .send_to(&[Command::STOP], addr)
-            .map_err(|_| "Couldn't send client start")?;
+        self.sock.send_to(&[Command::STOP], addr)?;
 
         self.hosts.remove(host);
 
         Ok(())
     }
 
-    fn scan(&mut self, own_ip: Addr) -> Result<(), &'static str> {
+    fn scan(&mut self, own_ip: Addr) -> Result<()> {
         println!("Scanning...\n");
         let IpAddr::V4(ip) = own_ip.ip() else {
             unreachable!()
@@ -477,9 +445,7 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
 
         let set_broadcast = self.sock.set_broadcast(true).is_ok();
 
-        self.sock
-            .set_read_timeout(Some(TIMEOUT_DURATION))
-            .map_err(|_| "Couldn't set timeout")?;
+        self.sock.set_read_timeout(Some(TIMEOUT_DURATION))?;
 
         match own_ip.broadcast() {
             Some(broadcast) if set_broadcast && !ip.is_loopback() => {
@@ -508,14 +474,13 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
     }
 
     #[allow(unused, clippy::ptr_arg)]
-    fn scan_with_template(&mut self, template: IPV4AddressTemplate) -> Result<(), &'static str> {
+    fn scan_with_template(&mut self, template: IPV4AddressTemplate) -> Result<()> {
         todo!()
     }
 
-    fn scan_with_broadcast(&mut self, broadcast: IpAddr) -> Result<(), &'static str> {
+    fn scan_with_broadcast(&mut self, broadcast: IpAddr) -> Result<()> {
         self.sock
-            .send_to(&[Command::PING], (broadcast, MAIN_PORT))
-            .map_err(|_| "Couldn't send ping")?;
+            .send_to(&[Command::PING], (broadcast, MAIN_PORT))?;
 
         let till = Instant::now() + WAIT_DURATION;
 
@@ -578,17 +543,15 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
         Ok(())
     }
 
-    fn get_image(&mut self, r: &mut impl Read) -> Result<Mat, &'static str> {
-        r.read_exact(&mut self.buffer[..size_of::<u64>()])
-            .map_err(|_| "Couldn't read image len")?;
-        let len = u64::from_be_bytes(self.buffer[..size_of::<u64>()].try_into().unwrap()) as usize;
+    fn get_image(&mut self, r: &mut impl Read) -> Result<Mat> {
+        r.read_exact(&mut self.buffer[..size_of::<u64>()])?;
+        let len = u64::from_be_bytes(self.buffer[..size_of::<u64>()].try_into()?) as usize;
 
         let mut buffer = core::Vector::from_elem(0, len);
 
-        r.read_exact(&mut buffer.as_mut_slice()[..len])
-            .map_err(|_| "Couldn't read image")?;
+        r.read_exact(&mut buffer.as_mut_slice()[..len])?;
 
-        imgcodecs::imdecode(&buffer, imgcodecs::IMREAD_COLOR).map_err(|_| "Couldn't decode image")
+        Ok(imgcodecs::imdecode(&buffer, imgcodecs::IMREAD_COLOR)?)
     }
 }
 
