@@ -1,8 +1,8 @@
 use camloc_common::cv::{calibrate, draw_charuco_board, find_board, generate_board, CameraParams};
-use clap::{Parser, Subcommand};
-use opencv::{
-    core, highgui, imgcodecs, objdetect::CharucoBoard, prelude::*, videoio::VideoCapture,
+use camloc_common::opencv::{
+    self, core, highgui, imgcodecs, objdetect::CharucoBoard, prelude::*, videoio::VideoCapture,
 };
+use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 struct Args {
@@ -155,7 +155,7 @@ fn main() -> opencv::Result<()> {
     Ok(())
 }
 
-pub fn take_samples(
+fn take_samples(
     board: &CharucoBoard,
     filename: Option<String>,
     camera_index: i32,

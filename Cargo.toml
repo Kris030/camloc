@@ -1,10 +1,12 @@
 [package]
-name = "camloc_calibration_cli"
+name = "camloc-calibration-cli"
 version = "0.1.0"
+authors = ["danipatko", "Kris030"]
 edition = "2021"
+description = "A DIY camera calibration cli for a DIY GPS for a dank engine."
+repository = "https://github.com/Kris030/camloc-calibration-cli"
 
 [dependencies]
-# TODO: camloc_common = { git = "https://github.com/Kris030/camloc_common" }
-camloc_common = { path = "../common", features = ["cv"] }
+anyhow = "1.0.71"
+camloc-common = { git = "https://github.com/Kris030/camloc-common", features = ["cv"] }
 clap = { version = "4.3.0", features = ["derive"] }
-opencv = "0.82.0"
