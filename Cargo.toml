@@ -1,6 +1,6 @@
 [package]
 name = "camloc-server"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["Kris030"]
 edition = "2021"
 description = "A DIY GPS for a dank engine."
@@ -11,10 +11,12 @@ exclude = ["test/"]
 tokio-serial = { version = "5.4", optional = true, features = ["libudev"] }
 camloc-common = { git = "https://github.com/Kris030/camloc-common" }
 tokio = { version = "1.28", features = ["full"] }
-anyhow = "1.0.71"
 futures = "0.3"
+anyhow = "1"
 
 [features]
 default = []
+
 all = ["serial-compass"]
+
 serial-compass = ["dep:tokio-serial"]
