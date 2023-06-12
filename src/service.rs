@@ -6,9 +6,7 @@ use camloc_common::{
 use futures::future::try_join_all;
 use std::{
     f64::NAN,
-    future::Future,
     net::SocketAddr,
-    pin::Pin,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -26,12 +24,12 @@ use crate::{
     MotionHint, PlacedCamera, TimedPosition,
 };
 
-struct ClientInfo {
+struct Client {
     last_data: TimeValidated<ClientData>,
     camera: PlacedCamera,
     address: SocketAddr,
 }
-impl ClientInfo {
+impl Client {
     fn new(
         address: SocketAddr,
         camera: PlacedCamera,
@@ -45,45 +43,33 @@ impl ClientInfo {
     }
 }
 
-type RetFuture<T = Result<()>> = Pin<Box<dyn Future<Output = T> + Send>>;
-
-pub enum Subscriber {
-    Connection(fn(SocketAddr, PlacedCamera) -> RetFuture),
-    Disconnection(fn(SocketAddr, PlacedCamera) -> RetFuture),
-    Position(fn(TimedPosition) -> RetFuture),
-    InfoUpdate(fn(SocketAddr, PlacedCamera) -> RetFuture),
+pub trait Subscriber: Send + Sync {
+    fn handle_event(&mut self, event: Event);
 }
 
-macro_rules! notify_subscribers {
-    ($self:expr, $subscriber_type:path, $($args:expr),* $(,)?) => {
-        {
-            let subs = $self.subscriptions.read().await;
-            try_join_all(subs.iter().filter_map(|s| {
-                if let $subscriber_type(func) = s {
-                    Some(func($($args),*))
-                } else {
-                    None
-                }
-            }))
-            .await?
-        }
-    };
+#[derive(Clone, Copy)]
+pub enum Event {
+    Connect(SocketAddr, PlacedCamera),
+    Disconnect(SocketAddr),
+    PositionUpdate(TimedPosition),
+    InfoUpdate(SocketAddr, PlacedCamera),
 }
 
-pub struct LocationService {
-    extrap: RwLock<Option<Extrapolation>>,
+struct LocationService {
+    extrap: RwLock<Option<Box<dyn Extrapolation + Send>>>,
     motion_data: RwLock<Option<MotionData>>,
-    subscriptions: RwLock<Vec<Subscriber>>,
+    subscriptions: RwLock<Vec<Box<dyn Subscriber + Send>>>,
     last_known_pos: RwLock<TimedPosition>,
-    clients: Mutex<Vec<ClientInfo>>,
+    clients: Mutex<Vec<Client>>,
     start_time: RwLock<Instant>,
-    compass: Mutex<Option<Box<dyn Compass + Send>>>,
+    compasses: Mutex<Vec<Box<dyn Compass + Send + 'static>>>,
     running: RwLock<bool>,
 }
 
 pub struct LocationServiceHandle {
     service_task_handle: Option<JoinHandle<Result<()>>>,
     service_handle: Arc<LocationService>,
+    data_validity: Duration,
 }
 
 impl Drop for LocationServiceHandle {
@@ -110,47 +96,47 @@ impl Drop for LocationServiceHandle {
     }
 }
 
-impl LocationService {
-    pub async fn start(
-        extrapolation: Option<Extrapolation>,
-        port: u16,
-        compass: Option<Box<dyn Compass + Send>>,
-        data_validity: Duration,
-    ) -> Result<LocationServiceHandle> {
-        let start_time = Instant::now();
+pub async fn start(
+    extrapolation: Option<impl Extrapolation + Send + 'static>,
+    port: u16,
+    compasses: impl IntoIterator<Item = Box<dyn Compass + Send + 'static>>,
+    data_validity: Duration,
+) -> Result<LocationServiceHandle> {
+    let start_time = Instant::now();
+    let udp_socket = UdpSocket::bind(("0.0.0.0", port)).await?;
 
-        let udp_socket = UdpSocket::bind(("0.0.0.0", port)).await?;
-
-        let instance = LocationService {
-            last_known_pos: TimedPosition {
-                position: Position::new(NAN, NAN, NAN),
-                extrapolated_by: None,
-                time: start_time,
-                start_time,
-            }
-            .into(),
-            start_time: start_time.into(),
-            subscriptions: vec![].into(),
-            extrap: extrapolation.into(),
-            motion_data: None.into(),
-            compass: Mutex::new(compass),
-            clients: vec![].into(),
-            running: true.into(),
-        };
-
-        let service_handle = Arc::new(instance);
-        let service_task_handle = Some(spawn(service_handle.clone().run(
-            udp_socket,
+    let instance = LocationService {
+        last_known_pos: TimedPosition {
+            position: Position::new(NAN, NAN, NAN),
+            extrapolated_by: None,
+            time: start_time,
             start_time,
-            data_validity,
-        )));
+        }
+        .into(),
+        start_time: start_time.into(),
+        subscriptions: vec![].into(),
+        extrap: RwLock::new(extrapolation.map(|e| Box::new(e) as Box<dyn Extrapolation + Send>)),
+        motion_data: None.into(),
+        compasses: Mutex::new(compasses.into_iter().collect()),
+        clients: vec![].into(),
+        running: true.into(),
+    };
 
-        Ok(LocationServiceHandle {
-            service_task_handle,
-            service_handle,
-        })
-    }
+    let service_handle = Arc::new(instance);
+    let service_task_handle = Some(spawn(service_handle.clone().run(
+        udp_socket,
+        start_time,
+        data_validity,
+    )));
 
+    Ok(LocationServiceHandle {
+        service_task_handle,
+        service_handle,
+        data_validity,
+    })
+}
+
+impl LocationService {
     async fn run(
         self: Arc<Self>,
         udp_socket: UdpSocket,
@@ -275,7 +261,7 @@ impl LocationService {
                 // connection request
                 Ok(Command::Connect { position, fov }) => {
                     let camera = PlacedCamera::new(position, fov);
-                    self.clients.lock().await.push(ClientInfo::new(
+                    self.clients.lock().await.push(Client::new(
                         recv_addr,
                         camera,
                         TimeValidated::new_with_change(
@@ -285,7 +271,9 @@ impl LocationService {
                         ),
                     ));
 
-                    notify_subscribers!(self, Subscriber::Connection, recv_addr, camera);
+                    for s in self.subscriptions.write().await.iter_mut() {
+                        s.handle_event(Event::Connect(recv_addr, camera));
+                    }
                 }
 
                 Ok(Command::InfoUpdate {
@@ -301,7 +289,9 @@ impl LocationService {
                                 c.camera.fov = fov;
                             }
 
-                            notify_subscribers!(self, Subscriber::InfoUpdate, c.address, c.camera);
+                            for s in self.subscriptions.write().await.iter_mut() {
+                                s.handle_event(Event::InfoUpdate(c.address, c.camera));
+                            }
                             break;
                         }
                     }
@@ -314,12 +304,10 @@ impl LocationService {
                     for i in 0..clients.len() {
                         if clients[i].address == recv_addr {
                             clients.remove(i);
-                            notify_subscribers!(
-                                self,
-                                Subscriber::Disconnection,
-                                clients[i].address,
-                                clients[i].camera,
-                            );
+
+                            for s in self.subscriptions.write().await.iter_mut() {
+                                s.handle_event(Event::Disconnect(clients[i].address));
+                            }
                             break;
                         }
                     }
@@ -348,17 +336,27 @@ impl LocationService {
         data: &[(Option<ClientData>, PlacedCamera)],
         cube: [u8; 4],
     ) -> Result<()> {
-        let motion_data = *self.motion_data.read().await;
+        let mut compasses = self.compasses.lock().await;
+        let compass_count = compasses.len();
 
-        let mut compass = self.compass.lock().await;
-        let compass_value = if let Some(compass) = &mut *compass {
-            compass.get_value()
-        } else {
-            None
+        let compass_value: Option<f64> = 'avg: {
+            if compass_count == 0 {
+                break 'avg None;
+            }
+
+            let mut compass_values = Vec::with_capacity(compasses.len());
+            for compass in compasses.iter_mut() {
+                if let Some(v) = compass.get_value().await {
+                    compass_values.push(v);
+                }
+            }
+
+            Some(compass_values.iter().copied().sum::<f64>() / compass_count as f64)
         };
-        drop(compass);
+        drop(compasses);
 
         let mut last_pos = self.last_known_pos.write().await;
+        let motion_data = *self.motion_data.read().await;
 
         let data = PositionData::new(data, motion_data, compass_value, last_pos.position, cube);
         let Some(position) = calculate_position(&data) else { return Ok(()); };
@@ -374,10 +372,12 @@ impl LocationService {
 
         let mut ex = self.extrap.write().await;
         if let Some(ref mut ex) = *ex {
-            ex.extrapolator.add_datapoint(calculated_position);
+            ex.add_datapoint(calculated_position);
         };
 
-        notify_subscribers!(self, Subscriber::Position, calculated_position);
+        for s in self.subscriptions.write().await.iter_mut() {
+            s.handle_event(Event::PositionUpdate(calculated_position));
+        }
 
         Ok(())
     }
@@ -395,11 +395,18 @@ impl LocationServiceHandle {
         };
     }
 
-    pub async fn subscribe(&self, action: Subscriber) {
-        self.service_handle.subscriptions.write().await.push(action);
+    pub async fn subscribe(&self, action: impl Subscriber + Send + 'static) {
+        self.service_handle
+            .subscriptions
+            .write()
+            .await
+            .push(Box::new(action));
     }
 
-    pub async fn modify_subscriptions(&self, action: impl FnOnce(&mut Vec<Subscriber>)) {
+    pub async fn modify_subscriptions(
+        &self,
+        action: impl FnOnce(&mut Vec<Box<dyn Subscriber + Send>>),
+    ) {
         action(&mut *self.service_handle.subscriptions.write().await);
     }
 
@@ -418,18 +425,16 @@ impl LocationServiceHandle {
 
         let ex = self.service_handle.extrap.read().await;
         if let Some(x) = &*ex {
-            if now > pos.time + x.invalidate_after {
+            if now > pos.time + self.data_validity {
                 return None;
             }
 
-            x.extrapolator
-                .extrapolate(now)
-                .map(|extrapolated| TimedPosition {
-                    position: extrapolated,
-                    start_time,
-                    time: now,
-                    extrapolated_by: x.extrapolator.get_last_datapoint().map(|p| now - p.time),
-                })
+            x.extrapolate(now).map(|extrapolated| TimedPosition {
+                position: extrapolated,
+                start_time,
+                time: now,
+                extrapolated_by: x.get_last_datapoint().map(|p| now - p.time),
+            })
         } else {
             Some(pos)
         }
@@ -443,16 +448,20 @@ impl LocationServiceHandle {
         *self.service_handle.running.read().await
     }
 
-    pub async fn set_extrapolation(&self, extrapolation: Option<Extrapolation>) {
-        let mut ex = self.service_handle.extrap.write().await;
-        *ex = extrapolation;
+    pub async fn set_extrapolation(&self, extrapolation: Option<impl Extrapolation + 'static>) {
+        *self.service_handle.extrap.write().await =
+            extrapolation.map(|e| Box::new(e) as Box<dyn Extrapolation + Send>);
     }
 
-    pub async fn set_compass(&self, compass: Option<Box<dyn Compass + Send>>) {
-        let mut comp = self.service_handle.compass.lock().await;
-        if let Some(comp) = comp.as_mut() {
-            comp.stop();
-        }
-        *comp = compass;
+    pub async fn add_compass(&self, compass: impl Compass + Send + 'static) {
+        self.service_handle
+            .compasses
+            .lock()
+            .await
+            .push(Box::new(compass));
+    }
+
+    pub async fn modify_compasses(&self, action: impl FnOnce(&mut Vec<Box<dyn Compass + Send>>)) {
+        action(&mut *self.service_handle.compasses.lock().await);
     }
 }

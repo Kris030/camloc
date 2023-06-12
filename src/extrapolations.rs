@@ -1,33 +1,33 @@
 use crate::TimedPosition;
 use camloc_common::{Lerp, Position};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 #[macro_export]
 macro_rules! no_extrapolation {
-    () => {
-        Option::<Extrapolation<()>>::None
-    };
+    () => {{
+        struct NoExtrap;
+        impl Extrapolator for NoExtrap {
+            fn add_datapoint(&mut self, _: TimedPosition) {
+                unreachable!()
+            }
+
+            fn get_last_datapoint(&self) -> Option<TimedPosition> {
+                unreachable!()
+            }
+
+            fn extrapolate(&self, _: Instant) -> Option<Position> {
+                unreachable!()
+            }
+        }
+        Option::<NoExtrap<()>>::None
+    };};
 }
 pub use no_extrapolation;
 
-pub trait Extrapolator: Send + Sync {
+pub trait Extrapolation: Send + Sync {
     fn add_datapoint(&mut self, position: TimedPosition);
     fn get_last_datapoint(&self) -> Option<TimedPosition>;
     fn extrapolate(&self, time: Instant) -> Option<Position>;
-}
-
-pub struct Extrapolation {
-    pub extrapolator: Box<dyn Extrapolator>,
-    pub invalidate_after: Duration,
-}
-
-impl Extrapolation {
-    pub fn new<E: Extrapolator + Default + 'static>(invalidate_after: Duration) -> Self {
-        Extrapolation {
-            extrapolator: Box::<E>::default(),
-            invalidate_after,
-        }
-    }
 }
 
 #[derive(Debug, Default)]
@@ -45,13 +45,13 @@ impl LinearExtrapolation {
     }
 }
 
-impl Extrapolator for LinearExtrapolation {
+impl Extrapolation for LinearExtrapolation {
     fn add_datapoint(&mut self, position: TimedPosition) {
         self.data[self.p] = Some(position);
         self.p = (self.p + 1) % self.data.len();
     }
 
-    fn extrapolate(&self, time: Instant) -> Option<Position> {
+    fn extrapolate(&self, to: Instant) -> Option<Position> {
         let p_prev = if self.p == 0 {
             self.data.len() - 1
         } else {
@@ -61,7 +61,7 @@ impl Extrapolator for LinearExtrapolation {
         let Some(d1) = self.data[self.p] else { return None; };
         let Some(d2) = self.data[p_prev] else { return None; };
 
-        let td = time - d1.time;
+        let td = to - d1.time;
         let tmax = d2.time - d1.time;
         let t = td.as_secs_f64() / tmax.as_secs_f64();
 
@@ -70,19 +70,5 @@ impl Extrapolator for LinearExtrapolation {
 
     fn get_last_datapoint(&self) -> Option<TimedPosition> {
         self.data[self.p]
-    }
-}
-
-impl Extrapolator for () {
-    fn add_datapoint(&mut self, _: TimedPosition) {
-        unreachable!("This implementation only exists to not have to provide a concrete type when not using extrapolation")
-    }
-
-    fn get_last_datapoint(&self) -> Option<TimedPosition> {
-        unreachable!("This implementation only exists to not have to provide a concrete type when not using extrapolation")
-    }
-
-    fn extrapolate(&self, _: Instant) -> Option<Position> {
-        unreachable!("This implementation only exists to not have to provide a concrete type when not using extrapolation")
     }
 }

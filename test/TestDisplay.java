@@ -55,8 +55,8 @@ public class TestDisplay {
 	private static void startDataThread() {
 		new Thread(() -> {
 			DataInputStream bis = new DataInputStream(System.in);
-			while (true) {
-				try {
+			try {
+				while (true) {
 					int what = bis.readInt();
 					switch (what) {
 						case 0:
@@ -83,18 +83,44 @@ public class TestDisplay {
 
 						case 2:
 							String h = bis.readUTF();
-							cameras.removeIf(cf -> cf.host == h);
-							redraw = true;
+
+							synchronized (cameras) {
+								for (int i = 0; i < cameras.size(); i++) {
+									if (cameras.get(i).host == h) {
+										cameras.remove(i);
+										redraw = true;
+										break;
+									}
+								}
+							}
+							break;
+
+						case 3:
+							PlacedCamera update = new PlacedCamera(
+								bis.readUTF(),
+								bis.readDouble(),
+								bis.readDouble(),
+								bis.readDouble(),
+								bis.readDouble()
+							);
+							synchronized (cameras) {
+								for (int i = 0; i < cameras.size(); i++) {
+									if (cameras.get(i).host == update.host) {
+										cameras.set(i, update);
+										redraw = true;
+										break;
+									}
+								}
+							}
 							break;
 
 						default: throw new Exception("WHAT??? " + what);
 					}
-				} catch (EOFException e) {
-					break;
-				} catch (Exception e) {
-					e.printStackTrace();
-					return;
 				}
+			} catch (EOFException e) {
+			} catch (Exception e) {
+				e.printStackTrace();
+				return;
 			}
 		}).start();
 	}
