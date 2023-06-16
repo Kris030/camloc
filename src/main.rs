@@ -2,6 +2,7 @@ mod scanning;
 mod utils;
 
 use anyhow::{anyhow, Result};
+use camloc_common::opencv::{self, core, imgcodecs, prelude::*};
 use camloc_common::{
     choice,
     cv::{self, display_image},
@@ -12,7 +13,6 @@ use camloc_common::{
     yes_no_choice, Position,
 };
 use network_interface::{Addr, NetworkInterface, NetworkInterfaceConfig};
-use camloc_common::opencv::{self, core, imgcodecs, prelude::*};
 use scanning::IPV4AddressTemplate;
 use std::{
     io::{Read, Write},
