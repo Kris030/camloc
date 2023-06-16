@@ -92,22 +92,19 @@ pub fn avg_corners(bounding: &types::VectorOfPoint2f) -> core::Point2i {
 }
 
 pub fn bounding_to_rect(bounding: &types::VectorOfPoint2f, offset: i32) -> core::Rect2i {
-    let (sx, sy, ex, ey) = bounding
-        .iter()
-        .fold((-1, -1, -1, -1), |(sx, sy, ex, ey), p| {
-            (
-                sx.min(p.x as i32),
-                sy.min(p.y as i32),
-                ex.max(p.x as i32),
-                ey.max(p.y as i32),
-            )
-        });
+    let (mut sx, mut sy, mut ex, mut ey) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
+    for p in bounding {
+        sx = sx.min(p.x as i32);
+        sy = sy.min(p.y as i32);
+        ex = ex.max(p.x as i32);
+        ey = ey.max(p.y as i32);
+    }
 
     core::Rect2i::new(
         sx - offset,
         sy - offset,
-        (sx - ex).abs() + (2 * offset),
-        (sy - ey).abs() + (2 * offset),
+        ex - sx + (2 * offset),
+        ey - sy + (2 * offset),
     )
 }
 
