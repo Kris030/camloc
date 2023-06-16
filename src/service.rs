@@ -79,20 +79,14 @@ impl Drop for LocationServiceHandle {
             .take()
             .expect("Service task handle should always be Some");
 
-        let running = self.service_handle.running.write();
-        let res = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                let mut running = running.await;
-                *running = false;
-                drop(running);
+        let hand = self.service_handle.clone();
+        spawn(async move {
+            let mut running = hand.running.write().await;
+            *running = false;
+            drop(running);
 
-                handle.await.is_ok()
-            })
+            handle.await.unwrap().unwrap();
         });
-
-        if !res {
-            panic!("Should always be able join the task");
-        }
     }
 }
 
