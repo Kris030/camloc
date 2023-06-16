@@ -114,7 +114,10 @@ public class TestDisplay {
 							}
 							break;
 
-						default: throw new Exception("WHAT??? " + what);
+						default:
+							byte[] bs = new byte[20];
+							bis.read(bs);
+							throw new Exception("WHAT??? " + what + " after: " + new String(bs));
 					}
 				}
 			} catch (EOFException e) {

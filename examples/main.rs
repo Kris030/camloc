@@ -228,11 +228,16 @@ async fn on_position(position: TimedPosition) -> tokio::io::Result<()> {
     println!("{position}");
 
     let mut se = stderr();
-    se.write_i32(0).await?;
-
-    se.write_f64(position.position.x).await?;
-    se.write_f64(position.position.y).await?;
-    se.write_f64(position.position.rotation).await?;
+    se.write_all(
+        &[
+            0i32.to_be_bytes().as_slice(),
+            position.position.x.to_be_bytes().as_slice(),
+            position.position.y.to_be_bytes().as_slice(),
+            position.position.rotation.to_be_bytes().as_slice(),
+        ]
+        .concat(),
+    )
+    .await?;
 
     Ok(())
 }
@@ -242,17 +247,19 @@ async fn on_connect(address: SocketAddr, camera: PlacedCamera) -> tokio::io::Res
     println!("New camera connected from {address}");
 
     let mut se = stderr();
-    se.write_i32(1).await?;
-
-    se.write_u16(address.len() as u16).await?;
-    se.write_all(address.as_bytes()).await?;
-
-    se.write_f64(camera.position.x).await?;
-    se.write_f64(camera.position.y).await?;
-    se.write_f64(camera.position.rotation).await?;
-
-    se.write_f64(camera.fov).await?;
-
+    se.write_all(
+        &[
+            1i32.to_be_bytes().as_slice(),
+            (address.len() as u16).to_be_bytes().as_slice(),
+            address.as_bytes(),
+            camera.position.x.to_be_bytes().as_slice(),
+            camera.position.y.to_be_bytes().as_slice(),
+            camera.position.rotation.to_be_bytes().as_slice(),
+            camera.fov.to_be_bytes().as_slice(),
+        ]
+        .concat(),
+    )
+    .await?;
     Ok(())
 }
 
@@ -261,10 +268,16 @@ async fn on_disconnect(address: SocketAddr) -> tokio::io::Result<()> {
     println!("Camera disconnected from {address}");
 
     let mut se = stderr();
-    se.write_i32(2).await?;
 
-    se.write_u16(address.len() as u16).await?;
-    se.write_all(address.as_bytes()).await?;
+    se.write_all(
+        &[
+            2i32.to_be_bytes().as_slice(),
+            (address.len() as u16).to_be_bytes().as_slice(),
+            address.as_bytes(),
+        ]
+        .concat(),
+    )
+    .await?;
 
     Ok(())
 }
@@ -273,16 +286,19 @@ async fn on_info_update(address: SocketAddr, camera: PlacedCamera) -> tokio::io:
     let address = address.to_string();
 
     let mut se = stderr();
-    se.write_i32(3).await?;
-
-    se.write_u16(address.len() as u16).await?;
-    se.write_all(address.as_bytes()).await?;
-
-    se.write_f64(camera.position.x).await?;
-    se.write_f64(camera.position.y).await?;
-    se.write_f64(camera.position.rotation).await?;
-
-    se.write_f64(camera.fov).await?;
+    se.write_all(
+        &[
+            3i32.to_be_bytes().as_slice(),
+            (address.len() as u16).to_be_bytes().as_slice(),
+            address.as_bytes(),
+            camera.position.x.to_be_bytes().as_slice(),
+            camera.position.y.to_be_bytes().as_slice(),
+            camera.position.rotation.to_be_bytes().as_slice(),
+            camera.fov.to_be_bytes().as_slice(),
+        ]
+        .concat(),
+    )
+    .await?;
 
     Ok(())
 }
