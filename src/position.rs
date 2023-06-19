@@ -1,6 +1,11 @@
-use crate::Position;
-
 use super::Lerp;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Position {
+    pub x: f64,
+    pub y: f64,
+    pub rotation: f64,
+}
 
 impl Position {
     pub const fn new(x: f64, y: f64, rotation: f64) -> Self {
@@ -70,5 +75,75 @@ impl Lerp for Position {
             f64::lerp(&s.y, &e.y, t),
             f64::lerp(&s.rotation, &e.rotation, t),
         )
+    }
+}
+
+impl std::ops::Add for Position {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Position {
+            x: self.x + rhs.x,
+            y: self.y + rhs.y,
+            rotation: self.rotation + rhs.rotation,
+        }
+    }
+}
+
+impl std::ops::Sub for Position {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Position {
+            x: self.x - rhs.x,
+            y: self.y - rhs.y,
+            rotation: self.rotation - rhs.rotation,
+        }
+    }
+}
+
+impl std::ops::AddAssign for Position {
+    fn add_assign(&mut self, rhs: Self) {
+        self.x += rhs.x;
+        self.y += rhs.y;
+        self.rotation += rhs.rotation;
+    }
+}
+
+impl std::ops::SubAssign for Position {
+    fn sub_assign(&mut self, rhs: Self) {
+        self.x -= rhs.x;
+        self.y -= rhs.y;
+        self.rotation -= rhs.rotation;
+    }
+}
+
+impl std::ops::Mul<f64> for Position {
+    type Output = Self;
+
+    fn mul(self, rhs: f64) -> Self::Output {
+        Position {
+            x: self.x * rhs,
+            y: self.y * rhs,
+            rotation: self.rotation * rhs,
+        }
+    }
+}
+
+impl std::ops::MulAssign<f64> for Position {
+    fn mul_assign(&mut self, rhs: f64) {
+        self.x *= rhs;
+        self.y *= rhs;
+        self.rotation *= rhs;
+    }
+}
+
+impl std::iter::Sum for Position {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        let mut s = Position::new(0., 0., 0.);
+        for p in iter {
+            s += p;
+        }
+        s
     }
 }

@@ -13,12 +13,7 @@ pub use opencv;
 pub mod hosts;
 pub mod position;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Position {
-    pub x: f64,
-    pub y: f64,
-    pub rotation: f64,
-}
+pub use position::Position;
 
 pub trait Lerp {
     fn lerp(start: &Self, end: &Self, t: f64) -> Self;
