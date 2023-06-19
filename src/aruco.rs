@@ -14,7 +14,6 @@ use camloc_common::{cv::get_aruco_dictionary, hosts::ClientData};
 pub struct Detector {
     detector: objdetect::ArucoDetector,
     corners: types::VectorOfVectorOfPoint2f,
-    rejected: types::VectorOfVectorOfPoint2f,
     marker_ids: core::Vector<i32>,
     cube: [u8; 4],
 }
@@ -34,7 +33,6 @@ impl Detector {
                 },
             )?,
             corners: types::VectorOfVectorOfPoint2f::new(),
-            rejected: types::VectorOfVectorOfPoint2f::new(),
             marker_ids: core::Vector::new(),
             cube,
         })
@@ -50,7 +48,7 @@ impl Detector {
             frame,
             &mut self.corners,
             &mut self.marker_ids,
-            &mut self.rejected,
+            &mut core::no_array(),
         )?;
 
         let Some((index, marker_id)) = self.marker_ids.iter()
@@ -128,7 +126,7 @@ pub struct Aruco {
     tracked_object: Option<ClientData>,
     detector: Detector,
     tracker: Tracker,
-    // THINKME: sanity checks
+    // TODO: sanity checks
 }
 
 impl Aruco {

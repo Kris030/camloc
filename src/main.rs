@@ -226,9 +226,11 @@ fn inner_loop(
         // find & send x value
         cam.read(&mut frame)?;
 
-        frame.copy_to(&mut draw)?;
+        if gui {
+            frame.copy_to(&mut draw)?;
+        }
 
-        if let Some(data) = aruco.detect(frame, Some(&mut draw))? {
+        if let Some(data) = aruco.detect(frame, if gui { Some(&mut draw) } else { None })? {
             socket.send_to(
                 &Into::<Vec<u8>>::into(Command::ValueUpdate(data)),
                 config.server,
