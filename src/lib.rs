@@ -10,11 +10,6 @@ pub mod compass;
 pub mod extrapolations;
 pub mod service;
 
-#[cfg(feature = "serial-compass")]
-pub use tokio_serial;
-
-pub use tokio::sync::Mutex;
-
 #[derive(Clone, Copy)]
 pub enum MotionHint {
     MovingForwards,

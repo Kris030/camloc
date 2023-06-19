@@ -2,17 +2,17 @@ use camloc_common::{hosts::ClientData, Position};
 
 use crate::{MotionHint, PlacedCamera};
 
+#[allow(clippy::needless_range_loop)]
 pub fn calculate_position(position_data: &PositionData) -> Option<Position> {
     let c = position_data.data.len();
 
     let mut tangents = vec![None; c];
 
     let mut lines = 0u32;
-    #[allow(clippy::needless_range_loop)]
     for i in 0..c {
         if let (Some(data), camera) = position_data.data[i] {
-            tangents[i] =
-                Some((camera.position.rotation + (camera.fov * (0.5 - data.x_position))).tan());
+            let tan = (camera.position.rotation + (camera.fov * (0.5 - data.x_position))).tan();
+            tangents[i] = Some(tan);
             lines += 1;
         }
     }
@@ -20,31 +20,41 @@ pub fn calculate_position(position_data: &PositionData) -> Option<Position> {
         return None;
     }
 
-    let (mut x, mut y) = (0., 0.);
-    let points = ((lines * (lines - 1)) / 2) as f64;
+    // let (mut x, mut y) = (0., 0.);
+    // let points = ((lines * (lines - 1)) / 2) as f64;
+    let mut points = vec![];
 
+    // FIXME: 2+ cameras still piss themselves
     for i in 0..c {
-        for j in (i + 1)..c {
-            let Some(atan) = tangents[i] else { continue; };
+        let Some(atan) = tangents[i] else { continue; };
+        let c1 = position_data.data[i].1.position;
+
+        for j in 0..c {
+            if i == j {
+                continue;
+            }
+
             let Some(btan) = tangents[j] else { continue; };
 
-            let c1 = position_data.data[i].1.position;
             let c2 = position_data.data[j].1.position;
 
             let px = (c1.x * atan - c2.x * btan - c1.y + c2.y) / (atan - btan);
             let py = atan * (px - c1.x) + c1.y;
 
-            x += px / points;
-            y += py / points;
+            points.push(Position::new(px, py, f64::NAN));
         }
     }
+    let plen = points.len() as f64;
+    let p: Position = points.into_iter().sum();
+    let p: Position = p * (1. / plen);
+    let (x, y) = (p.x, p.y);
 
     let comp_rot = position_data.compass_data;
     let pos_rot = get_pos_based_rotation(x, y, position_data);
-    // TODO: improve calculation
+    // TODO: improve calculation (increase weight of position based)
     let (mut r, mut rc) = (0., 0u64);
 
-    for rot in [comp_rot, pos_rot].iter().flatten() {
+    for rot in [comp_rot, pos_rot].into_iter().flatten() {
         r += rot;
         rc += 1;
     }

@@ -1,6 +1,6 @@
 [package]
 name = "camloc-server"
-version = "0.2.1"
+version = "0.3.0"
 authors = ["Kris030"]
 edition = "2021"
 description = "A DIY GPS for a dank engine."
