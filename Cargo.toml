@@ -1,6 +1,6 @@
 [package]
 name = "camloc-common"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Kris030", "danipatko"]
 edition = "2021"
 description = "A DIY commons library for a DIY GPS for a dank engine."
@@ -8,9 +8,15 @@ repository = "https://github.com/Kris030/camloc-common"
 exclude = ["protocol.txt"]
 
 [dependencies]
+roblib-parsing = { git = "https://github.com/kareszklub/roblib-rs", optional = true }
+roblib-macro = { git = "https://github.com/kareszklub/roblib-rs", optional = true }
 opencv = { version = "0.82", optional = true }
 anyhow = "1.0.71"
 
 [features]
 default = []
+
+all = ["cv", "roblib-parsing"]
+
+roblib-parsing = ["dep:roblib-parsing", "dep:roblib-macro"]
 cv = ["dep:opencv"]
