@@ -50,7 +50,7 @@ pub trait Subscriber: Send + Sync {
 #[derive(Clone, Copy)]
 #[cfg_attr(
     feature = "roblib-parsing",
-    derive(roblib_macro::Readable, roblib_macro::Writable, roblib_macro::Event)
+    derive(roblib_macro::Event)
 )]
 pub enum Event {
     Connect(SocketAddr, PlacedCamera),
