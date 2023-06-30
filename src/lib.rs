@@ -18,6 +18,10 @@ pub enum MotionHint {
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
+#[cfg_attr(
+    feature = "roblib-parsing",
+    derive(roblib_macro::Readable, roblib_macro::Writable)
+)]
 pub struct PlacedCamera {
     /// Horizontal FOV (**in radians**)
     pub fov: f64,

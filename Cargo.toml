@@ -1,6 +1,6 @@
 [package]
 name = "camloc-server"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["Kris030"]
 edition = "2021"
 description = "A DIY GPS for a dank engine."
@@ -8,6 +8,8 @@ repository = "https://github.com/Kris030/camloc-server"
 exclude = ["test/"]
 
 [dependencies]
+roblib-parsing = { git = "https://github.com/kareszklub/roblib-rs", optional = true }
+roblib-macro = { git = "https://github.com/kareszklub/roblib-rs", optional = true }
 tokio-serial = { version = "5.4", optional = true, features = ["libudev"] }
 camloc-common = { git = "https://github.com/Kris030/camloc-common" }
 tokio = { version = "1.28", features = ["full"] }
@@ -17,6 +19,7 @@ anyhow = "1"
 [features]
 default = []
 
-all = ["serial-compass"]
+all = ["serial-compass", "roblib-parsing"]
 
 serial-compass = ["dep:tokio-serial"]
+roblib-parsing = ["dep:roblib-parsing", "dep:roblib-macro"]

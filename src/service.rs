@@ -48,10 +48,14 @@ pub trait Subscriber: Send + Sync {
 }
 
 #[derive(Clone, Copy)]
+#[cfg_attr(
+    feature = "roblib-parsing",
+    derive(roblib_macro::Readable, roblib_macro::Writable)
+)]
 pub enum Event {
     Connect(SocketAddr, PlacedCamera),
     Disconnect(SocketAddr),
-    PositionUpdate(TimedPosition),
+    PositionUpdate(Position),
     InfoUpdate(SocketAddr, PlacedCamera),
 }
 
@@ -370,7 +374,7 @@ impl LocationService {
         };
 
         for s in self.subscriptions.write().await.iter_mut() {
-            s.handle_event(Event::PositionUpdate(calculated_position));
+            s.handle_event(Event::PositionUpdate(calculated_position.position));
         }
 
         Ok(())
