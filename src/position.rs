@@ -1,10 +1,7 @@
 use super::Lerp;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-#[cfg_attr(
-    feature = "roblib-parsing",
-    derive(roblib_macro::Readable, roblib_macro::Writable)
-)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Position {
     pub x: f64,
     pub y: f64,
