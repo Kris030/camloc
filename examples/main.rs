@@ -1,9 +1,9 @@
 use anyhow::{anyhow, Result};
-use camloc_common::yes_no_choice;
+use camloc_common::{yes_no_choice, Position};
 use camloc_server::{
     extrapolations::LinearExtrapolation,
     service::{self, Event, Subscriber},
-    PlacedCamera, TimedPosition, MAIN_PORT,
+    PlacedCamera, MAIN_PORT,
 };
 
 #[cfg(feature = "serial-compass")]
@@ -224,16 +224,16 @@ impl Subscriber for MySubscriber {
     }
 }
 
-async fn on_position(position: TimedPosition) -> tokio::io::Result<()> {
+async fn on_position(position: Position) -> tokio::io::Result<()> {
     println!("{position}");
 
     let mut se = stderr();
     se.write_all(
         &[
             0i32.to_be_bytes().as_slice(),
-            position.position.x.to_be_bytes().as_slice(),
-            position.position.y.to_be_bytes().as_slice(),
-            position.position.rotation.to_be_bytes().as_slice(),
+            position.x.to_be_bytes().as_slice(),
+            position.y.to_be_bytes().as_slice(),
+            position.rotation.to_be_bytes().as_slice(),
         ]
         .concat(),
     )

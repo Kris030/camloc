@@ -11,6 +11,7 @@ pub mod extrapolations;
 pub mod service;
 
 #[derive(Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum MotionHint {
     MovingForwards,
     MovingBackwards,
@@ -18,10 +19,7 @@ pub enum MotionHint {
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
-#[cfg_attr(
-    feature = "roblib-parsing",
-    derive(roblib_macro::Readable, roblib_macro::Writable)
-)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PlacedCamera {
     /// Horizontal FOV (**in radians**)
     pub fov: f64,

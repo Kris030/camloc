@@ -48,10 +48,7 @@ pub trait Subscriber: Send + Sync {
 }
 
 #[derive(Clone, Copy)]
-#[cfg_attr(
-    feature = "roblib-parsing",
-    derive(roblib_macro::Readable, roblib_macro::Writable)
-)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Event {
     Connect(SocketAddr, PlacedCamera),
     Disconnect(SocketAddr),
@@ -65,7 +62,6 @@ struct LocationService {
     subscriptions: RwLock<Vec<Box<dyn Subscriber + Send>>>,
     last_known_pos: RwLock<TimedPosition>,
     clients: Mutex<Vec<Client>>,
-    start_time: RwLock<Instant>,
     compasses: Mutex<Vec<Box<dyn Compass + Send + 'static>>>,
     running: RwLock<bool>,
 }
@@ -111,7 +107,6 @@ pub async fn start(
             start_time,
         }
         .into(),
-        start_time: start_time.into(),
         subscriptions: vec![].into(),
         extrap: RwLock::new(extrapolation.map(|e| Box::new(e) as Box<dyn Extrapolation + Send>)),
         motion_data: None.into(),
@@ -408,7 +403,7 @@ impl LocationServiceHandle {
         action(&mut *self.service_handle.subscriptions.write().await);
     }
 
-    pub async fn get_position(&self) -> Option<TimedPosition> {
+    pub async fn get_position(&self) -> Option<Position> {
         if !*(self.service_handle.running.read().await) {
             return None;
         }
@@ -418,7 +413,6 @@ impl LocationServiceHandle {
             return None;
         }
 
-        let start_time = *self.service_handle.start_time.read().await;
         let now = Instant::now();
 
         let ex = self.service_handle.extrap.read().await;
@@ -427,14 +421,9 @@ impl LocationServiceHandle {
                 return None;
             }
 
-            x.extrapolate(now).map(|extrapolated| TimedPosition {
-                position: extrapolated,
-                start_time,
-                time: now,
-                extrapolated_by: x.get_last_datapoint().map(|p| now - p.time),
-            })
+            x.extrapolate(now)
         } else {
-            Some(pos)
+            Some(pos.position)
         }
     }
 
