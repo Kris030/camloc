@@ -60,7 +60,7 @@ struct LocationService {
     extrap: RwLock<Option<Box<dyn Extrapolation + Send>>>,
     motion_data: RwLock<Option<MotionData>>,
     subscriptions: RwLock<Vec<Box<dyn Subscriber + Send>>>,
-    last_known_pos: RwLock<TimedPosition>,
+    last_known_pos: RwLock<Option<TimedPosition>>,
     clients: Mutex<Vec<Client>>,
     compasses: Mutex<Vec<Box<dyn Compass + Send + 'static>>>,
     running: RwLock<bool>,
@@ -100,13 +100,7 @@ pub async fn start(
     let udp_socket = UdpSocket::bind(("0.0.0.0", port)).await?;
 
     let instance = LocationService {
-        last_known_pos: TimedPosition {
-            position: Position::new(NAN, NAN, NAN),
-            extrapolated_by: None,
-            time: start_time,
-            start_time,
-        }
-        .into(),
+        last_known_pos: None.into(),
         subscriptions: vec![].into(),
         extrap: RwLock::new(extrapolation.map(|e| Box::new(e) as Box<dyn Extrapolation + Send>)),
         motion_data: None.into(),
@@ -337,7 +331,7 @@ impl LocationService {
                 break 'avg None;
             }
 
-            let mut compass_values = Vec::with_capacity(compasses.len());
+            let mut compass_values = vec![0.; compasses.len()];
             for compass in compasses.iter_mut() {
                 if let Some(v) = compass.get_value().await {
                     compass_values.push(v);
@@ -351,7 +345,13 @@ impl LocationService {
         let mut last_pos = self.last_known_pos.write().await;
         let motion_data = *self.motion_data.read().await;
 
-        let data = PositionData::new(data, motion_data, compass_value, last_pos.position, cube);
+        let data = PositionData::new(
+            data,
+            motion_data,
+            compass_value,
+            last_pos.map(|p| p.position),
+            cube,
+        );
         let Some(position) = calculate_position(&data) else { return Ok(()); };
 
         let calculated_position = TimedPosition {
@@ -361,7 +361,7 @@ impl LocationService {
             extrapolated_by: None,
         };
 
-        *last_pos = calculated_position;
+        *last_pos = Some(calculated_position);
 
         let mut ex = self.extrap.write().await;
         if let Some(ref mut ex) = *ex {
@@ -378,14 +378,14 @@ impl LocationService {
 
 impl LocationServiceHandle {
     pub async fn set_motion_hint(&self, hint: Option<MotionHint>) {
-        *self.service_handle.motion_data.write().await = if let Some(hint) = hint {
-            Some(MotionData::new(
-                self.service_handle.last_known_pos.read().await.position,
-                hint,
-            ))
-        } else {
-            None
+        let pos_handle = self.service_handle.last_known_pos.read().await;
+        let Some(pos) = *pos_handle else {
+            return;
         };
+        drop(pos_handle);
+
+        let new_hint = hint.map(|hint| MotionData::new(pos.position, hint));
+        *self.service_handle.motion_data.write().await = new_hint;
     }
 
     pub async fn subscribe(&self, action: impl Subscriber + Send + 'static) {
@@ -408,7 +408,10 @@ impl LocationServiceHandle {
             return None;
         }
 
-        let pos = *self.service_handle.last_known_pos.read().await;
+        let Some(pos) = *self.service_handle.last_known_pos.read().await else {
+            return None;
+        };
+
         if pos.position.x.is_nan() || pos.position.y.is_nan() {
             return None;
         }

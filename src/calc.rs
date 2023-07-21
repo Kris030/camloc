@@ -24,16 +24,11 @@ pub fn calculate_position(position_data: &PositionData) -> Option<Position> {
     // let points = ((lines * (lines - 1)) / 2) as f64;
     let mut points = vec![];
 
-    // FIXME: 2+ cameras still piss themselves
     for i in 0..c {
         let Some(atan) = tangents[i] else { continue; };
         let c1 = position_data.data[i].1.position;
 
-        for j in 0..c {
-            if i == j {
-                continue;
-            }
-
+        for j in 0..i {
             let Some(btan) = tangents[j] else { continue; };
 
             let c2 = position_data.data[j].1.position;
@@ -44,6 +39,9 @@ pub fn calculate_position(position_data: &PositionData) -> Option<Position> {
             points.push(Position::new(px, py, f64::NAN));
         }
     }
+
+    dbg!(&points);
+
     let plen = points.len() as f64;
     let p: Position = points.into_iter().sum();
     let p: Position = p * (1. / plen);
@@ -51,6 +49,7 @@ pub fn calculate_position(position_data: &PositionData) -> Option<Position> {
 
     let comp_rot = position_data.compass_data;
     let pos_rot = get_pos_based_rotation(x, y, position_data);
+
     // TODO: improve calculation (increase weight of position based)
     let (mut r, mut rc) = (0., 0u64);
 
@@ -64,20 +63,16 @@ pub fn calculate_position(position_data: &PositionData) -> Option<Position> {
 }
 
 fn get_pos_based_rotation(x: f64, y: f64, position_data: &PositionData) -> Option<f64> {
-    let Some(data) = position_data.motion_data else { return None; };
+    let Some(data) = &position_data.motion_data else { return None; };
+    let Some(last_position) = &position_data.last_position else { return None; };
+
     let rot_dir = match data.hint {
         MotionHint::MovingBackwards => -1.,
         MotionHint::MovingForwards => 1.,
         MotionHint::Stationary => return Some(data.last_moving_position.rotation),
     };
 
-    Some(
-        rot_dir
-            * f64::atan2(
-                x - position_data.last_position.x,
-                y - position_data.last_position.y,
-            ),
-    )
+    Some(rot_dir * f64::atan2(x - last_position.x, y - last_position.y))
 }
 
 #[derive(Clone, Copy)]
@@ -99,7 +94,7 @@ pub struct PositionData<'a> {
     pub data: &'a [(Option<ClientData>, PlacedCamera)],
     pub motion_data: Option<MotionData>,
     pub compass_data: Option<f64>,
-    pub last_position: Position,
+    pub last_position: Option<Position>,
     pub cube: [u8; 4],
 }
 
@@ -108,7 +103,7 @@ impl<'a> PositionData<'a> {
         data: &'a [(Option<ClientData>, PlacedCamera)],
         motion_data: Option<MotionData>,
         compass_data: Option<f64>,
-        last_position: Position,
+        last_position: Option<Position>,
         cube: [u8; 4],
     ) -> Self {
         Self {
