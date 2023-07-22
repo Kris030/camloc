@@ -52,7 +52,7 @@ fn get_own_ip() -> Result<Addr> {
         println!("{}", n.name);
         for a in &n.addr {
             let ip = a.ip();
-            if !ip.is_ipv4() {
+            if !ip.is_ipv4() || ip.is_loopback() {
                 continue;
             }
 
@@ -60,6 +60,14 @@ fn get_own_ip() -> Result<Addr> {
             println!("{ai:<3}{ip}");
             ai += 1;
         }
+    }
+    if rnis.is_empty() {
+        return Err(anyhow::Error::msg("No network devices"));
+    }
+    if rnis.len() == 1 {
+        let ret = rnis[0];
+        println!("  Automatically chose {ret:?}");
+        return Ok(ret);
     }
 
     let ai: usize = get_from_stdin("\nEnter ip index: ")?;
@@ -197,7 +205,7 @@ impl<const BUFFER_SIZE: usize> Organizer<'_, '_, BUFFER_SIZE> {
             None,
         );
         let Ok(cmd) = cmd.map(|i| COMMANDS[i]) else {
-            return Ok(())
+            return Ok(());
         };
         println!();
         match cmd {
