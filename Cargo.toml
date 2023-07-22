@@ -1,0 +1,2 @@
+[workspace]
+members = ["common", "organizer", "client", "server", "calibration"]
