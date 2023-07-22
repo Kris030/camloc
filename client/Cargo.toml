@@ -9,5 +9,6 @@ repository = "https://github.com/Kris030/camloc-client"
 [dependencies]
 camloc-common = { git = "https://github.com/Kris030/camloc-common", features = ["cv"] }
 clap = { version = "4.3.0", features = ["derive"] }
+opencv = "0.83"
 anyhow = "1"
 ctrlc = "3.4"

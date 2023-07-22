@@ -1,8 +1,8 @@
 use camloc_common::cv::{calibrate, draw_charuco_board, find_board, generate_board, CameraParams};
-use camloc_common::opencv::{
+use clap::{Parser, Subcommand};
+use opencv::{
     self, core, highgui, imgcodecs, objdetect::CharucoBoard, prelude::*, videoio::VideoCapture,
 };
-use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 struct Args {

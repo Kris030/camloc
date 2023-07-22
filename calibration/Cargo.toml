@@ -7,6 +7,7 @@ description = "A DIY camera calibration cli for a DIY GPS for a dank engine."
 repository = "https://github.com/Kris030/camloc-calibration-cli"
 
 [dependencies]
-anyhow = "1"
 camloc-common = { git = "https://github.com/Kris030/camloc-common", features = ["cv"] }
 clap = { version = "4.3.0", features = ["derive"] }
+opencv = "0.83"
+anyhow = "1"

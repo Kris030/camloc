@@ -1,4 +1,4 @@
-use camloc_common::opencv::{
+use opencv::{
     self,
     core::{self, Ptr, Rect},
     objdetect,

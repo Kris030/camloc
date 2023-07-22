@@ -3,11 +3,6 @@ mod util;
 
 use crate::aruco::Aruco;
 use anyhow::{anyhow, Result};
-use camloc_common::opencv::{
-    self, core, highgui,
-    prelude::*,
-    videoio::{self, VideoCapture},
-};
 use camloc_common::{
     cv::FullCameraInfo,
     hosts::{
@@ -15,6 +10,11 @@ use camloc_common::{
         Command, HostInfo, HostState, HostType,
     },
     Position,
+};
+use opencv::{
+    self, core, highgui,
+    prelude::*,
+    videoio::{self, VideoCapture},
 };
 use std::{
     fs::File,

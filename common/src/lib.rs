@@ -7,8 +7,6 @@ use anyhow::{anyhow, Result};
 
 #[cfg(feature = "cv")]
 pub mod cv;
-#[cfg(feature = "cv")]
-pub use opencv;
 
 pub mod hosts;
 pub mod position;
