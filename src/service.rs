@@ -18,7 +18,7 @@ use tokio::{
 };
 
 use crate::{
-    calc::{calculate_position, MotionData, PositionData},
+    calc::{calculate_position, MotionData},
     compass::Compass,
     extrapolations::Extrapolation,
     MotionHint, PlacedCamera, TimedPosition,
@@ -91,9 +91,10 @@ impl Drop for LocationServiceHandle {
 }
 
 pub async fn start(
-    extrapolation: Option<impl Extrapolation + Send + 'static>,
+    extrapolation: Option<Box<dyn Extrapolation + Send + 'static>>,
     port: u16,
-    compasses: impl IntoIterator<Item = Box<dyn Compass + Send + 'static>>,
+    compasses: Vec<Box<dyn Compass + Send + 'static>>,
+    min_camera_angle_diff: f64,
     data_validity: Duration,
 ) -> Result<LocationServiceHandle> {
     let start_time = Instant::now();
@@ -102,9 +103,9 @@ pub async fn start(
     let instance = LocationService {
         last_known_pos: None.into(),
         subscriptions: vec![].into(),
-        extrap: RwLock::new(extrapolation.map(|e| Box::new(e) as Box<dyn Extrapolation + Send>)),
+        extrap: extrapolation.into(),
         motion_data: None.into(),
-        compasses: Mutex::new(compasses.into_iter().collect()),
+        compasses: compasses.into(),
         clients: vec![].into(),
         running: true.into(),
     };
@@ -113,6 +114,7 @@ pub async fn start(
     let service_task_handle = Some(spawn(service_handle.clone().run(
         udp_socket,
         start_time,
+        min_camera_angle_diff,
         data_validity,
     )));
 
@@ -128,6 +130,7 @@ impl LocationService {
         self: Arc<Self>,
         udp_socket: UdpSocket,
         start_time: Instant,
+        min_camera_angle_diff: f64,
         data_validity: Duration,
     ) -> Result<()> {
         let mut buf = [0u8; 64];
@@ -139,12 +142,11 @@ impl LocationService {
             }
             drop(r);
 
-            let Ok(recv_result) = tokio::time::timeout(
-				Duration::from_secs(1),
-				udp_socket.recv_from(&mut buf)
-			).await else {
-				continue;
-			};
+            let Ok(recv_result) =
+                tokio::time::timeout(Duration::from_secs(1), udp_socket.recv_from(&mut buf)).await
+            else {
+                continue;
+            };
             let (len, addr) = recv_result?;
 
             match buf[..len].try_into() {
@@ -173,12 +175,11 @@ impl LocationService {
             }
             drop(r);
 
-            let Ok(recv_result) = tokio::time::timeout(
-				Duration::from_secs(1),
-				udp_socket.recv_from(&mut buf)
-			).await else {
-				continue;
-			};
+            let Ok(recv_result) =
+                tokio::time::timeout(Duration::from_secs(1), udp_socket.recv_from(&mut buf)).await
+            else {
+                continue;
+            };
             let (recv_len, recv_addr) = recv_result?;
 
             let recv_time = Instant::now();
@@ -239,8 +240,14 @@ impl LocationService {
                     if let Some(client_index) = updated_client_index {
                         // and it was the client that was last updated
                         if oldest_data_index == client_index {
-                            self.update_position(start_time, recv_time, &data[..], cube)
-                                .await?;
+                            self.update_position(
+                                start_time,
+                                recv_time,
+                                min_camera_angle_diff,
+                                &data[..],
+                                cube,
+                            )
+                            .await?;
                         }
                     }
                 }
@@ -320,6 +327,7 @@ impl LocationService {
         self: &Arc<Self>,
         start_time: Instant,
         recv_time: Instant,
+        min_camera_angle_diff: f64,
         data: &[(Option<ClientData>, PlacedCamera)],
         cube: [u8; 4],
     ) -> Result<()> {
@@ -345,14 +353,16 @@ impl LocationService {
         let mut last_pos = self.last_known_pos.write().await;
         let motion_data = *self.motion_data.read().await;
 
-        let data = PositionData::new(
+        let Some(position) = calculate_position(
+            min_camera_angle_diff,
             data,
             motion_data,
             compass_value,
             last_pos.map(|p| p.position),
             cube,
-        );
-        let Some(position) = calculate_position(&data) else { return Ok(()); };
+        ) else {
+            return Ok(());
+        };
 
         let calculated_position = TimedPosition {
             position,

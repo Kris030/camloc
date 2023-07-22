@@ -3,14 +3,21 @@ use camloc_common::{hosts::ClientData, Position};
 use crate::{MotionHint, PlacedCamera};
 
 #[allow(clippy::needless_range_loop)]
-pub fn calculate_position(position_data: &PositionData) -> Option<Position> {
-    let c = position_data.data.len();
+pub fn calculate_position(
+    min_camera_angle_diff: f64,
+    data: &[(Option<ClientData>, PlacedCamera)],
+    motion_data: Option<MotionData>,
+    compass_data: Option<f64>,
+    last_position: Option<Position>,
+    _cube: [u8; 4],
+) -> Option<Position> {
+    let c = data.len();
 
     let mut tangents = vec![None; c];
 
     let mut lines = 0u32;
     for i in 0..c {
-        if let (Some(data), camera) = position_data.data[i] {
+        if let (Some(data), camera) = data[i] {
             let tan = (camera.position.rotation + (camera.fov * (0.5 - data.x_position))).tan();
             tangents[i] = Some(tan);
             lines += 1;
@@ -20,35 +27,47 @@ pub fn calculate_position(position_data: &PositionData) -> Option<Position> {
         return None;
     }
 
-    // let (mut x, mut y) = (0., 0.);
-    // let points = ((lines * (lines - 1)) / 2) as f64;
-    let mut points = vec![];
+    let (mut x, mut y) = (0., 0.);
+    let mut points = 0usize;
 
     for i in 0..c {
-        let Some(atan) = tangents[i] else { continue; };
-        let c1 = position_data.data[i].1.position;
+        let Some(atan) = tangents[i] else {
+            continue;
+        };
+        let c1 = data[i].1.position;
+        let a1 = c1.rotation % 180.;
 
         for j in 0..i {
-            let Some(btan) = tangents[j] else { continue; };
+            let Some(btan) = tangents[j] else {
+                continue;
+            };
 
-            let c2 = position_data.data[j].1.position;
+            let c2 = data[j].1.position;
+            let a2 = c2.rotation % 180.;
+
+            let diff = (a1 - a2).abs();
+            let diff = diff.min(180. - diff);
+            if diff < min_camera_angle_diff {
+                continue;
+            }
 
             let px = (c1.x * atan - c2.x * btan - c1.y + c2.y) / (atan - btan);
             let py = atan * (px - c1.x) + c1.y;
 
-            points.push(Position::new(px, py, f64::NAN));
+            x += px;
+            y += py;
+
+            points += 1;
         }
     }
 
-    dbg!(&points);
+    let points = points as f64;
 
-    let plen = points.len() as f64;
-    let p: Position = points.into_iter().sum();
-    let p: Position = p * (1. / plen);
-    let (x, y) = (p.x, p.y);
+    x /= points;
+    y /= points;
 
-    let comp_rot = position_data.compass_data;
-    let pos_rot = get_pos_based_rotation(x, y, position_data);
+    let comp_rot = compass_data;
+    let pos_rot = get_pos_based_rotation(x, y, motion_data, last_position);
 
     // TODO: improve calculation (increase weight of position based)
     let (mut r, mut rc) = (0., 0u64);
@@ -62,9 +81,18 @@ pub fn calculate_position(position_data: &PositionData) -> Option<Position> {
     Some(Position::new(x, y, r))
 }
 
-fn get_pos_based_rotation(x: f64, y: f64, position_data: &PositionData) -> Option<f64> {
-    let Some(data) = &position_data.motion_data else { return None; };
-    let Some(last_position) = &position_data.last_position else { return None; };
+fn get_pos_based_rotation(
+    x: f64,
+    y: f64,
+    motion_data: Option<MotionData>,
+    last_position: Option<Position>,
+) -> Option<f64> {
+    let Some(data) = motion_data else {
+        return None;
+    };
+    let Some(last_position) = &last_position else {
+        return None;
+    };
 
     let rot_dir = match data.hint {
         MotionHint::MovingBackwards => -1.,
@@ -86,32 +114,6 @@ impl MotionData {
         Self {
             last_moving_position,
             hint,
-        }
-    }
-}
-
-pub struct PositionData<'a> {
-    pub data: &'a [(Option<ClientData>, PlacedCamera)],
-    pub motion_data: Option<MotionData>,
-    pub compass_data: Option<f64>,
-    pub last_position: Option<Position>,
-    pub cube: [u8; 4],
-}
-
-impl<'a> PositionData<'a> {
-    pub fn new(
-        data: &'a [(Option<ClientData>, PlacedCamera)],
-        motion_data: Option<MotionData>,
-        compass_data: Option<f64>,
-        last_position: Option<Position>,
-        cube: [u8; 4],
-    ) -> Self {
-        Self {
-            last_position,
-            compass_data,
-            motion_data,
-            data,
-            cube,
         }
     }
 }

@@ -160,13 +160,13 @@ async fn run() -> Result<()> {
     #[cfg(feature = "serial-compass")]
     let compasses = get_compasses().await?;
     #[cfg(not(feature = "serial-compass"))]
-    let compasses = [];
+    let compasses = vec![];
 
     let location_service = service::start(
-        Some(LinearExtrapolation::new()),
-        // no_extrapolation!(),
+        Some(Box::new(LinearExtrapolation::new())),
         MAIN_PORT,
-        compasses.into_iter(),
+        compasses,
+        15f64.to_radians(),
         Duration::from_millis(500),
     )
     .await?;

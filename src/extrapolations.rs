@@ -2,28 +2,6 @@ use crate::TimedPosition;
 use camloc_common::{Lerp, Position};
 use std::time::Instant;
 
-#[macro_export]
-macro_rules! no_extrapolation {
-    () => {{
-        struct NoExtrap;
-        impl Extrapolator for NoExtrap {
-            fn add_datapoint(&mut self, _: TimedPosition) {
-                unreachable!()
-            }
-
-            fn get_last_datapoint(&self) -> Option<TimedPosition> {
-                unreachable!()
-            }
-
-            fn extrapolate(&self, _: Instant) -> Option<Position> {
-                unreachable!()
-            }
-        }
-        Option::<NoExtrap<()>>::None
-    };};
-}
-pub use no_extrapolation;
-
 pub trait Extrapolation: Send + Sync {
     fn add_datapoint(&mut self, position: TimedPosition);
     fn get_last_datapoint(&self) -> Option<TimedPosition>;
@@ -58,8 +36,12 @@ impl Extrapolation for LinearExtrapolation {
             self.p - 1
         };
 
-        let Some(d1) = self.data[self.p] else { return None; };
-        let Some(d2) = self.data[p_prev] else { return None; };
+        let Some(d1) = self.data[self.p] else {
+            return None;
+        };
+        let Some(d2) = self.data[p_prev] else {
+            return None;
+        };
 
         let td = to - d1.time;
         let tmax = d2.time - d1.time;
