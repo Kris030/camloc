@@ -1,6 +1,6 @@
 [package]
 name = "camloc-common"
-version = "0.4.0"
+version = "0.4.1"
 authors = ["Kris030", "danipatko"]
 edition = "2021"
 description = "A DIY commons library for a DIY GPS for a dank engine."

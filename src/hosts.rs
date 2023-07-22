@@ -1,5 +1,3 @@
-use std::mem::size_of;
-
 use crate::Position;
 
 #[allow(clippy::unusual_byte_groupings)]
@@ -173,7 +171,7 @@ impl From<Command<'_>> for Vec<u8> {
             Command::Disconnect => vec![Command::DISCONNECT],
 
             Command::Start => vec![Command::START],
-            Command::StartServer { cube } => vec![
+            Command::StartServer { cube } => [
                 Command::START_SERVER.to_be_bytes().as_slice(),
                 cube.map(u8::to_be).as_slice(),
             ]
@@ -243,71 +241,59 @@ impl<'a> TryFrom<&'a [u8]> for Command<'a> {
 
         // without the command byte
         let cmd = buf[0];
-        let len = len - 1;
         let buf = &buf[1..];
 
-        // TODO: check sizes
-        Ok(match cmd {
-            Command::PING => Command::Ping,
-            Command::START => Command::Start,
-            Command::STOP => Command::Stop,
-            Command::REQUEST_IMAGE => Command::RequestImage,
-            Command::IMAGES_DONE => Command::ImagesDone,
-            Command::DISCONNECT => Command::Disconnect,
+        (|| {
+            Some(match cmd {
+                Command::PING => Command::Ping,
+                Command::START => Command::Start,
+                Command::STOP => Command::Stop,
+                Command::REQUEST_IMAGE => Command::RequestImage,
+                Command::IMAGES_DONE => Command::ImagesDone,
+                Command::DISCONNECT => Command::Disconnect,
 
-            Command::VALUE_UPDATE => Command::ValueUpdate(ClientData {
-                marker_id: u8::from_be(buf[0]),
-                x_position: f64::from_be_bytes(
-                    buf[1..size_of::<f64>() + 1].try_into().map_err(|_| ())?,
-                ),
-            }),
+                Command::VALUE_UPDATE => Command::ValueUpdate(ClientData {
+                    marker_id: u8::from_be(*buf.first()?),
+                    x_position: f64::from_be_bytes(buf.get(1..9)?.try_into().ok()?),
+                }),
 
-            Command::CONNECT => Command::Connect {
-                position: Position::from_be_bytes(&buf[..24].try_into().unwrap()),
-                fov: f64::from_be_bytes(
-                    buf[3 * size_of::<f64>()..4 * size_of::<f64>()]
-                        .try_into()
-                        .map_err(|_| ())?,
-                ),
-            },
+                Command::CONNECT => Command::Connect {
+                    position: Position::from_be_bytes(&buf.get(..24)?.try_into().ok()?),
+                    fov: f64::from_be_bytes(buf.get(24..32)?.try_into().ok()?),
+                },
 
-            Command::INFO_UPDATE => {
-                let ip_len = u16::from_be_bytes(buf[..2].try_into().unwrap()) as usize;
-                let client_ip = std::str::from_utf8(&buf[2..2 + ip_len]).unwrap();
-                let position = Position::from_be_bytes(&buf[..26].try_into().unwrap());
-                let fov = if buf[26] == 1 {
-                    Some(f64::from_be_bytes(
-                        buf[27..27 + size_of::<f64>()].try_into().map_err(|_| ())?,
-                    ))
-                } else {
-                    None
-                };
-                Command::InfoUpdate {
-                    client_ip,
-                    position,
-                    fov,
-                }
-            }
-
-            Command::START_CONFIGLESS => {
-                let ip_len = u16::from_be_bytes(buf[..size_of::<u16>()].try_into().map_err(|_| ())?)
-                    as usize;
-                if len != size_of::<u16>() + ip_len {
-                    return Err(());
+                Command::INFO_UPDATE => {
+                    let ip_len = u16::from_be_bytes(buf.get(..2)?.try_into().ok()?) as usize;
+                    let client_ip = std::str::from_utf8(buf.get(2..2 + ip_len)?).unwrap();
+                    let position = Position::from_be_bytes(&buf.get(..26)?.try_into().ok()?);
+                    let fov = if *buf.get(26)? == 1 {
+                        Some(f64::from_be_bytes(buf.get(27..35)?.try_into().ok()?))
+                    } else {
+                        None
+                    };
+                    Command::InfoUpdate {
+                        client_ip,
+                        position,
+                        fov,
+                    }
                 }
 
-                Command::StartConfigless {
-                    ip: std::str::from_utf8(&buf[size_of::<u16>()..size_of::<u16>() + ip_len])
-                        .map_err(|_| ())?,
+                Command::START_CONFIGLESS => {
+                    let ip_len = u16::from_be_bytes(buf.get(..2)?.try_into().ok()?) as usize;
+
+                    Command::StartConfigless {
+                        ip: std::str::from_utf8(buf.get(2..2 + ip_len)?).ok()?,
+                    }
                 }
-            }
 
-            Command::START_SERVER => Command::StartServer {
-                cube: [buf[0], buf[1], buf[2], buf[3]],
-            },
+                Command::START_SERVER => Command::StartServer {
+                    cube: buf.get(..4)?.try_into().ok()?,
+                },
 
-            _ => return Err(()),
-        })
+                _ => return None,
+            })
+        })()
+        .ok_or(())
     }
 }
 
