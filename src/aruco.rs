@@ -40,7 +40,7 @@ impl Detector {
 
     pub fn detect(
         &mut self,
-        frame: &mut Mat,
+        frame: &Mat,
         rect: Option<&mut core::Rect>,
         draw: Option<&mut Mat>,
     ) -> opencv::Result<Option<ClientData>> {
@@ -51,9 +51,12 @@ impl Detector {
             &mut core::no_array(),
         )?;
 
-        let Some((index, marker_id)) = self.marker_ids.iter()
+        let Some((index, marker_id)) = self
+            .marker_ids
+            .iter()
             .enumerate()
-            .find(|(_, s)| self.cube.contains(&(*s as u8))) else {
+            .find(|(_, s)| self.cube.contains(&(*s as u8)))
+        else {
             return Ok(None);
         };
         let marker_id = marker_id as u8;
@@ -140,11 +143,13 @@ impl Aruco {
 
     pub fn detect(
         &mut self,
-        frame: &mut Mat,
+        frame: &Mat,
         draw: Option<&mut Mat>,
     ) -> opencv::Result<Option<ClientData>> {
         self.tracked_object = if let Some(ClientData { marker_id, .. }) = self.tracked_object {
-            self.tracker.track(frame, draw)?.map(|x| ClientData {
+            let track = self.tracker.track(frame, draw)?;
+
+            track.map(|x| ClientData {
                 marker_id,
                 x_position: x,
             })
@@ -152,9 +157,11 @@ impl Aruco {
             let res = self
                 .detector
                 .detect(frame, Some(&mut self.tracker.rect), draw)?;
+
             if res.is_some() {
                 self.tracker.init(frame)?;
             }
+
             res
         };
 
