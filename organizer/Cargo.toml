@@ -1,0 +1,13 @@
+[package]
+name = "camloc-organizer"
+version = "0.1.0"
+authors = ["Kris030"]
+edition = "2021"
+description = "A DIY overlord for a DIY GPS for a dank engine."
+repository = "https://github.com/Kris030/camloc-organizer"
+
+[dependencies]
+camloc-common = { git = "https://github.com/Kris030/camloc-common", features = ["cv"] }
+clap = { version = "4.3.0", features = ["derive"] }
+network-interface = "1.0"
+anyhow = "1"
