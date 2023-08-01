@@ -9,7 +9,7 @@ exclude = ["protocol.txt"]
 
 [dependencies]
 serde = { version = "1", optional = true, features = ["derive"] }
-opencv = { version = "0.83", optional = true }
+opencv = { version = "0.84", optional = true }
 anyhow = "1"
 
 [features]

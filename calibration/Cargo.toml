@@ -9,5 +9,5 @@ repository = "https://github.com/Kris030/camloc-calibration-cli"
 [dependencies]
 camloc-common = { git = "https://github.com/Kris030/camloc-common", features = ["cv"] }
 clap = { version = "4.3.0", features = ["derive"] }
-opencv = "0.83"
+opencv = "0.84"
 anyhow = "1"
