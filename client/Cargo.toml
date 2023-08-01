@@ -4,10 +4,10 @@ version = "0.1.0"
 authors = ["danipatko", "Kris030"]
 edition = "2021"
 description = "A DIY camera client for a DIY GPS for a dank engine."
-repository = "https://github.com/Kris030/camloc-client"
+repository = "https://github.com/Kris030/camloc"
 
 [dependencies]
-camloc-common = { git = "https://github.com/Kris030/camloc-common", features = ["cv"] }
+camloc-common = { git = "https://github.com/Kris030/camloc", features = ["cv"] }
 clap = { version = "4.3.0", features = ["derive"] }
 opencv = "0.84"
 anyhow = "1"

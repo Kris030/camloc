@@ -4,12 +4,12 @@ version = "0.6.0"
 authors = ["Kris030"]
 edition = "2021"
 description = "A DIY GPS for a dank engine."
-repository = "https://github.com/Kris030/camloc-server"
+repository = "https://github.com/Kris030/camloc"
 exclude = ["test/"]
 
 [dependencies]
 tokio-serial = { version = "5.4", optional = true, features = ["libudev"] }
-camloc-common = { git = "https://github.com/Kris030/camloc-common" }
+camloc-common = { git = "https://github.com/Kris030/camloc" }
 serde = { version = "1", optional = true, features = ["derive"] }
 tokio = { version = "1.28", features = ["full"] }
 futures = "0.3"
