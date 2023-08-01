@@ -1,46 +1,16 @@
-use std::{future::Future, pin::Pin};
+use async_trait::async_trait;
 
-#[macro_export]
-macro_rules! no_compass {
-    () => {
-        if true {
-            None
-        } else {
-            struct NoCompass;
-            impl Compass for NoCompass {
-                fn get_value(
-                    &mut self,
-                ) -> ::std::pin::Pin<
-                    Box<dyn ::std::future::Future<Output = Option<f64>> + Send + Sync>,
-                > {
-                    unreachable!()
-                }
-
-                fn stop(
-                    self,
-                ) -> ::std::pin::Pin<Box<dyn ::std::future::Future<Output = ()> + Send + Sync>>
-                {
-                    unreachable!()
-                }
-
-                fn stop_box(
-                    self: Box<Self>,
-                ) -> ::std::pin::Pin<Box<dyn ::std::future::Future<Output = ()> + Send + Sync>>
-                {
-                    unreachable!()
-                }
-            }
-
-            Some(NoCompass)
-        }
-    };
+pub struct NoCompass;
+#[async_trait]
+impl Compass for NoCompass {
+    async fn get_value(&mut self) -> Option<f64> {
+        unreachable!()
+    }
 }
 
-pub use no_compass;
+#[async_trait]
 pub trait Compass: Send + Sync {
-    fn get_value(&mut self) -> Pin<Box<dyn Future<Output = Option<f64>> + Send + Sync>>;
-    fn stop(self) -> Pin<Box<dyn Future<Output = ()> + Send + Sync>>;
-    fn stop_box(self: Box<Self>) -> Pin<Box<dyn Future<Output = ()> + Send + Sync>>;
+    async fn get_value(&mut self) -> Option<f64>;
 }
 
 #[cfg(feature = "serial-compass")]
@@ -123,23 +93,18 @@ pub mod serial {
         pub const DATA_SIGNAL: [u8; 1] = [b'$'];
     }
 
+    #[async_trait]
     impl Compass for SerialCompass {
-        fn get_value(&mut self) -> Pin<Box<dyn Future<Output = Option<f64>> + Send + Sync>> {
+        async fn get_value(&mut self) -> Option<f64> {
             let dets = self.shared.clone();
-            Box::pin(async move { *dets.last_value.read().await })
+            *dets.last_value.read().await
         }
 
-        fn stop(self) -> Pin<Box<dyn Future<Output = ()> + Send + Sync>> {
-            Box::pin(async move {
-                let mut r = self.shared.run.write().await;
-                *r = false;
-                drop(r);
-                self.handle.await.unwrap();
-            })
-        }
-
-        fn stop_box(self: Box<Self>) -> Pin<Box<dyn Future<Output = ()> + Send + Sync>> {
-            self.stop()
+        async fn stop(self) -> () {
+            let mut r = self.shared.run.write().await;
+            *r = false;
+            drop(r);
+            self.handle.await.unwrap();
         }
     }
 }

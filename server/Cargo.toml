@@ -14,6 +14,8 @@ serde = { version = "1", optional = true, features = ["derive"] }
 tokio = { version = "1.28", features = ["full"] }
 futures = "0.3"
 anyhow = "1"
+tokio-util = "0.7.8"
+async-trait = "0.1.72"
 
 [features]
 default = []

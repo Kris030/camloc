@@ -8,6 +8,19 @@ pub trait Extrapolation: Send + Sync {
     fn extrapolate(&self, time: Instant) -> Option<Position>;
 }
 
+pub struct NoExtrapolation;
+impl Extrapolation for NoExtrapolation {
+    fn add_datapoint(&mut self, position: TimedPosition) {}
+
+    fn get_last_datapoint(&self) -> Option<TimedPosition> {
+        None
+    }
+
+    fn extrapolate(&self, time: Instant) -> Option<Position> {
+        None
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct LinearExtrapolation {
     data: [Option<TimedPosition>; 2],

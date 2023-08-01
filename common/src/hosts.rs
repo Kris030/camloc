@@ -120,7 +120,7 @@ pub enum Command<'a> {
         position: Position,
         fov: f64,
     },
-    Disconnect,
+    ClientDisconnect,
 
     Start,
     StartServer {
@@ -145,7 +145,7 @@ pub enum Command<'a> {
 impl Command<'_> {
     pub const PING: u8 = 0x0b;
     pub const CONNECT: u8 = 0xcc;
-    pub const DISCONNECT: u8 = 0xdc;
+    pub const CLIENT_DISCONNECT: u8 = 0xdc;
     pub const START: u8 = 0x60;
     pub const START_SERVER: u8 = 0x55;
     pub const START_CONFIGLESS: u8 = 0x6c;
@@ -168,7 +168,7 @@ impl From<Command<'_>> for Vec<u8> {
             ]
             .concat(),
 
-            Command::Disconnect => vec![Command::DISCONNECT],
+            Command::ClientDisconnect => vec![Command::CLIENT_DISCONNECT],
 
             Command::Start => vec![Command::START],
             Command::StartServer { cube } => [
@@ -250,7 +250,7 @@ impl<'a> TryFrom<&'a [u8]> for Command<'a> {
                 Command::STOP => Command::Stop,
                 Command::REQUEST_IMAGE => Command::RequestImage,
                 Command::IMAGES_DONE => Command::ImagesDone,
-                Command::DISCONNECT => Command::Disconnect,
+                Command::CLIENT_DISCONNECT => Command::ClientDisconnect,
 
                 Command::VALUE_UPDATE => Command::ValueUpdate(ClientData {
                     marker_id: u8::from_be(*buf.first()?),

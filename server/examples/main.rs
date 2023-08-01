@@ -162,7 +162,7 @@ async fn run() -> Result<()> {
     #[cfg(not(feature = "serial-compass"))]
     let compasses = vec![];
 
-    let location_service = service::start(
+    let location_service = service::Builder(
         Some(Box::new(LinearExtrapolation::new())),
         MAIN_PORT,
         compasses,
