@@ -190,14 +190,14 @@ fn inner_loop(
         highgui::named_window("videocap", highgui::WINDOW_AUTOSIZE)?;
     }
 
-    loop {
+    let stopped_by_server = loop {
         let read_timeout = socket.read_timeout()?;
 
         socket.set_read_timeout(Some(Duration::from_millis(1)))?;
 
         match socket.recv_from(buf) {
             Ok((len, addr)) => match buf[..len].try_into() {
-                Ok(Command::Stop) => break,
+                Ok(Command::Stop) => break true,
 
                 Ok(Command::Ping) => {
                     socket.send_to(
@@ -220,7 +220,7 @@ fn inner_loop(
         socket.set_read_timeout(read_timeout)?;
 
         if gui && highgui::wait_key(10)? == 113 {
-            break;
+            break false;
         }
 
         // find & send x value
@@ -240,13 +240,15 @@ fn inner_loop(
         if gui {
             highgui::imshow("videocap", &draw)?;
         }
-    }
+    };
 
     if gui {
         highgui::destroy_all_windows()?;
     }
 
-    socket.send_to(&[Command::DISCONNECT], config.server)?;
+    if !stopped_by_server {
+        socket.send_to(&[Command::CLIENT_DISCONNECT], config.server)?;
+    }
 
     Ok(())
 }

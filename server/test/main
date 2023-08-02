@@ -1,8 +1,19 @@
 #!/bin/bash
 
-cargo_opts="--release --example main --features=serial-compass"
+cargo_opts="--release --example main"
+
+read -r -p "Use serial compass? (y/N) " yn
+
+case $yn in
+	[yY] ) echo ok, we will proceed;
+    	cargo_opts="$cargo_opts --features=serial-compass"
+		;;
+esac
+
+echo "opts: $cargo_opts"
+
 
 cargo b $cargo_opts &&
-javac -d dump test/TestDisplay.java &&
-exec 3> >(java -cp dump TestDisplay) &&
+(cd server && javac -d dump test/TestDisplay.java) &&
+exec 3> >(cd server && java -cp dump TestDisplay) &&
 cargo r $cargo_opts -q 2>&3

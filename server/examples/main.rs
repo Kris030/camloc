@@ -1,13 +1,13 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use camloc_common::{yes_no_choice, Position};
 use camloc_server::{
-    extrapolations::LinearExtrapolation,
-    service::{self, Event, Subscriber},
-    PlacedCamera, MAIN_PORT,
+    service::{self, Event},
+    PlacedCamera,
 };
 
 #[cfg(feature = "serial-compass")]
 use camloc_server::compass::Compass;
+use tokio_util::sync::CancellationToken;
 
 use std::{net::SocketAddr, time::Duration};
 use tokio::{
@@ -24,23 +24,15 @@ fn main() {
 }
 
 #[cfg(feature = "serial-compass")]
-async fn get_compass(
-    used: &mut std::collections::HashSet<String>,
-) -> Result<Option<Box<dyn Compass + Send + 'static>>> {
+async fn get_compass() -> Result<camloc_server::compass::serial::SerialCompass> {
     use camloc_common::{choice, get_from_stdin};
     use camloc_server::compass::serial::SerialCompass;
     use tokio_serial::{SerialPortBuilderExt, SerialPortType};
 
-    if !yes_no_choice("Do you want to use a serial compass?", false) {
-        return Ok(None);
-    }
-
     let mut devices = tokio_serial::available_ports()?;
-    devices.retain(|d| !used.contains(&d.port_name));
 
     if devices.is_empty() {
-        println!("  No serial devices available");
-        return Ok(None);
+        return Err(anyhow::Error::msg("No serial devices available"));
     }
 
     println!("  Available serial devices:");
@@ -138,90 +130,66 @@ async fn get_compass(
         }
     }
 
-    used.insert(name);
-
-    Ok(Some(Box::new(compass)))
-}
-
-#[cfg(feature = "serial-compass")]
-async fn get_compasses() -> Result<Vec<Box<dyn Compass + Send + 'static>>> {
-    let mut used = std::collections::HashSet::new();
-    let mut compasses = vec![];
-
-    while let Some(c) = get_compass(&mut used).await? {
-        compasses.push(c);
-    }
-
-    Ok(compasses)
+    Ok(compass)
 }
 
 #[tokio::main]
 async fn run() -> Result<()> {
+    let service = service::Builder::new();
+
     #[cfg(feature = "serial-compass")]
-    let compasses = get_compasses().await?;
-    #[cfg(not(feature = "serial-compass"))]
-    let compasses = vec![];
+    let service = service.with_compass(get_compass().await?);
 
-    let location_service = service::Builder(
-        Some(Box::new(LinearExtrapolation::new())),
-        MAIN_PORT,
-        compasses,
-        15f64.to_radians(),
-        Duration::from_millis(500),
-    )
-    .await?;
+    let mut service = service.start().await?;
 
-    location_service.subscribe(MySubscriber).await;
+    service.enable_events().await;
 
-    let ctrlc_task = tokio::spawn(tokio::signal::ctrl_c());
+    let cancell_parent = CancellationToken::new();
+    let cancell = cancell_parent.child_token();
+    spawn(async move {
+        tokio::signal::ctrl_c().await.unwrap();
+        cancell_parent.cancel();
+    });
 
     if yes_no_choice("Subscription mode (or query)?", true) {
-        // nothing, we'll wait wait for ctr+c
+        loop {
+            let ev = tokio::select! {
+                e = service.get_event() => e,
+                _ = cancell.cancelled() => break
+            }?;
+
+            match ev {
+                Event::Connect(address, camera) => {
+                    spawn(on_connect(address, camera));
+                }
+
+                Event::Disconnect(address) => {
+                    spawn(on_disconnect(address));
+                }
+
+                Event::InfoUpdate(address, camera) => {
+                    spawn(on_info_update(address, camera));
+                }
+
+                Event::PositionUpdate(position) => {
+                    spawn(on_position(position));
+                }
+            }
+        }
     } else {
         let mut interval = tokio::time::interval(Duration::from_millis(50));
-        loop {
-            if let Some(p) = location_service.get_position().await {
+        while !cancell.is_cancelled() {
+            if let Some(p) = service.get_position().await {
                 on_position(p).await?;
             } else {
                 println!("Couldn't get position");
-            }
-
-            if ctrlc_task.is_finished() {
-                break;
             }
 
             interval.tick().await;
         }
     }
 
-    if !matches!(ctrlc_task.await, Ok(Ok(_))) {
-        return Err(anyhow!("Something failed in the ctrl+c channel"));
-    }
-
     Ok(())
-}
-
-struct MySubscriber;
-impl Subscriber for MySubscriber {
-    fn handle_event(&mut self, event: Event) {
-        match event {
-            Event::Connect(address, camera) => {
-                spawn(on_connect(address, camera));
-            }
-
-            Event::Disconnect(address) => {
-                spawn(on_disconnect(address));
-            }
-
-            Event::InfoUpdate(address, camera) => {
-                spawn(on_info_update(address, camera));
-            }
-
-            Event::PositionUpdate(position) => {
-                spawn(on_position(position));
-            }
-        }
-    }
 }
 
 async fn on_position(position: Position) -> tokio::io::Result<()> {

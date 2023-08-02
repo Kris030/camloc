@@ -10,13 +10,13 @@ pub trait Extrapolation: Send + Sync {
 
 pub struct NoExtrapolation;
 impl Extrapolation for NoExtrapolation {
-    fn add_datapoint(&mut self, position: TimedPosition) {}
+    fn add_datapoint(&mut self, _: TimedPosition) {}
 
     fn get_last_datapoint(&self) -> Option<TimedPosition> {
         None
     }
 
-    fn extrapolate(&self, time: Instant) -> Option<Position> {
+    fn extrapolate(&self, _: Instant) -> Option<Position> {
         None
     }
 }

@@ -15,7 +15,8 @@ pub trait Compass: Send + Sync {
 
 #[cfg(feature = "serial-compass")]
 pub mod serial {
-    use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
+    use async_trait::async_trait;
+    use std::{sync::Arc, time::Duration};
     use tokio::{sync::RwLock, task::JoinHandle};
 
     use super::Compass;
@@ -23,7 +24,6 @@ pub mod serial {
     struct SharedData {
         last_value: RwLock<Option<f64>>,
         compass_offset: RwLock<f64>,
-        run: RwLock<bool>,
     }
 
     pub struct SerialCompass {
@@ -42,7 +42,6 @@ pub mod serial {
             let details = Arc::new(SharedData {
                 compass_offset: RwLock::const_new(compass_offset),
                 last_value: RwLock::const_new(None),
-                run: RwLock::const_new(true),
             });
             let details2 = details.clone();
 
@@ -51,12 +50,6 @@ pub mod serial {
                 let mut i = tokio::time::interval(update_interval);
                 loop {
                     i.tick().await;
-
-                    let r = details2.run.read().await;
-                    if !*r {
-                        break;
-                    }
-                    drop(r);
 
                     if serial_port.write_all(&Self::DATA_SIGNAL).await.is_err() {
                         *details2.last_value.write().await = None;
@@ -96,15 +89,14 @@ pub mod serial {
     #[async_trait]
     impl Compass for SerialCompass {
         async fn get_value(&mut self) -> Option<f64> {
-            let dets = self.shared.clone();
-            *dets.last_value.read().await
+            let x = self.shared.last_value.read().await;
+            *x
         }
+    }
 
-        async fn stop(self) -> () {
-            let mut r = self.shared.run.write().await;
-            *r = false;
-            drop(r);
-            self.handle.await.unwrap();
+    impl Drop for SerialCompass {
+        fn drop(&mut self) {
+            self.handle.abort();
         }
     }
 }
