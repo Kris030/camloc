@@ -1,5 +1,6 @@
 use anyhow::Result;
 use camloc_common::{yes_no_choice, Position};
+use camloc_server::service::LocationServiceTrait;
 use camloc_server::{
     service::{self, Event},
     PlacedCamera,

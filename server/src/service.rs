@@ -1,4 +1,5 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use camloc_common::{
     hosts::{constants::MAIN_PORT, ClientData, Command, HostInfo, HostState, HostType},
     Position, TimeValidated,
@@ -407,8 +408,20 @@ impl<C: Compass, E: Extrapolation> Inner<C, E> {
     }
 }
 
-impl<C: Compass, E: Extrapolation> LocationService<C, E> {
-    pub async fn set_motion_hint(&self, hint: Option<MotionHint>) {
+#[async_trait]
+pub trait LocationServiceTrait {
+    async fn set_motion_hint(&self, hint: Option<MotionHint>);
+    async fn enable_events(&self);
+    async fn set_events(&self, enable: bool);
+    async fn disable_events(&self);
+    async fn get_event(&mut self) -> Result<Event>;
+    async fn get_position(&self) -> Option<Position>;
+    async fn stop(self) -> Result<()>;
+}
+
+#[async_trait]
+impl<C: Compass, E: Extrapolation> LocationServiceTrait for LocationService<C, E> {
+    async fn set_motion_hint(&self, hint: Option<MotionHint>) {
         let pos_handle = self.service_handle.last_known_pos.read().await;
         let Some(pos) = *pos_handle else {
             return;
@@ -419,23 +432,23 @@ impl<C: Compass, E: Extrapolation> LocationService<C, E> {
         *self.service_handle.motion_data.write().await = new_hint;
     }
 
-    pub async fn enable_events(&self) {
+    async fn enable_events(&self) {
         self.set_events(true).await
     }
-    pub async fn set_events(&self, enable: bool) {
+    async fn set_events(&self, enable: bool) {
         self.service_handle
             .send_events
             .store(enable, Ordering::SeqCst);
     }
-    pub async fn disable_events(&self) {
+    async fn disable_events(&self) {
         self.set_events(false).await
     }
 
-    pub async fn get_event(&mut self) -> Result<Event> {
+    async fn get_event(&mut self) -> Result<Event> {
         Ok(self.event_rx.wait_for(|e| e.is_some()).await?.unwrap())
     }
 
-    pub async fn get_position(&self) -> Option<Position> {
+    async fn get_position(&self) -> Option<Position> {
         let Some(pos) = *self.service_handle.last_known_pos.read().await else {
             return None;
         };
@@ -454,7 +467,7 @@ impl<C: Compass, E: Extrapolation> LocationService<C, E> {
         ex.extrapolate(now)
     }
 
-    pub async fn stop(mut self) -> Result<()> {
+    async fn stop(mut self) -> Result<()> {
         let Some(h) = self.service_task_handle.take() else {
             return Err(anyhow::Error::msg("Service background task already joined"));
         };
