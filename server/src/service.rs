@@ -409,7 +409,7 @@ impl<C: Compass, E: Extrapolation> Inner<C, E> {
 }
 
 #[async_trait]
-pub trait LocationServiceTrait {
+pub trait LocationServiceTrait: Send + Sync {
     async fn set_motion_hint(&self, hint: Option<MotionHint>);
     async fn enable_events(&self);
     async fn set_events(&self, enable: bool);
