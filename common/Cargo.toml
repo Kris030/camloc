@@ -6,6 +6,7 @@ edition = "2021"
 description = "A DIY commons library for a DIY GPS for a dank engine."
 repository = "https://github.com/Kris030/camloc"
 exclude = ["protocol.txt"]
+license = "MIT"
 
 [dependencies]
 serde = { version = "1", optional = true, features = ["derive"] }

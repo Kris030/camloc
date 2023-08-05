@@ -5,6 +5,7 @@ authors = ["Kris030"]
 edition = "2021"
 description = "A DIY overlord for a DIY GPS for a dank engine."
 repository = "https://github.com/Kris030/camloc"
+license = "MIT"
 
 [dependencies]
 camloc-common = { path = "../common", version = "0.1", features = ["cv"] }

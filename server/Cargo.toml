@@ -6,6 +6,7 @@ edition = "2021"
 description = "A DIY GPS for a dank engine."
 repository = "https://github.com/Kris030/camloc"
 exclude = ["test/"]
+license = "MIT"
 
 [dependencies]
 tokio-serial = { version = "5.4", optional = true, features = ["libudev"] }
