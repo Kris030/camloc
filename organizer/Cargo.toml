@@ -7,7 +7,7 @@ description = "A DIY overlord for a DIY GPS for a dank engine."
 repository = "https://github.com/Kris030/camloc"
 
 [dependencies]
-camloc-common = { git = "https://github.com/Kris030/camloc", features = ["cv"] }
+camloc-common = { path = "../common", version = "0.1", features = ["cv"] }
 clap = { version = "4.3.0", features = ["derive"] }
 network-interface = "1.0"
 opencv = "0.84"

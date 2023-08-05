@@ -7,7 +7,7 @@ use camloc_common::{
 use futures::future::try_join_all;
 use std::{
     f64::NAN,
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    net::{Ipv4Addr, SocketAddr},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -68,6 +68,7 @@ pub struct LocationService<C, E> {
 pub struct Builder<C, E> {
     last_known_pos: Option<TimedPosition>,
     motion_data: Option<MotionData>,
+    cancel_token: CancellationToken,
     min_camera_angle_diff: f64,
     data_validity: Duration,
     clients: Vec<Client>,
@@ -79,10 +80,11 @@ pub struct Builder<C, E> {
 impl Builder<NoCompass, LinearExtrapolation> {
     pub fn new() -> Self {
         Self {
+            address: (Ipv4Addr::LOCALHOST, MAIN_PORT).into(),
             min_camera_angle_diff: 15f64.to_radians(),
             data_validity: Duration::from_millis(500),
-            address: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, MAIN_PORT)),
             extrapolation: LinearExtrapolation::new(),
+            cancel_token: CancellationToken::new(),
             last_known_pos: None,
             compass: NoCompass,
             motion_data: None,
@@ -107,7 +109,7 @@ impl<C, E> Builder<C, E> {
         self.data_validity = v;
         self
     }
-    pub fn with_clients(
+    pub fn with_client(
         mut self,
         last_data: TimeValidated<ClientData>,
         camera: PlacedCamera,
@@ -124,6 +126,10 @@ impl<C, E> Builder<C, E> {
         self.address = v;
         self
     }
+    pub fn with_cancellation_token(mut self, v: CancellationToken) -> Self {
+        self.cancel_token = v;
+        self
+    }
     pub fn with_extrapolation<N: Extrapolation>(self, v: N) -> Builder<C, N> {
         Builder {
             extrapolation: v,
@@ -134,6 +140,7 @@ impl<C, E> Builder<C, E> {
             min_camera_angle_diff: self.min_camera_angle_diff,
             last_known_pos: self.last_known_pos,
             motion_data: self.motion_data,
+            cancel_token: self.cancel_token,
         }
     }
     pub fn with_compass<N: Compass>(self, v: N) -> Builder<N, E> {
@@ -146,6 +153,7 @@ impl<C, E> Builder<C, E> {
             extrapolation: self.extrapolation,
             last_known_pos: self.last_known_pos,
             motion_data: self.motion_data,
+            cancel_token: self.cancel_token,
         }
     }
 }
@@ -167,10 +175,10 @@ impl<C: Compass + 'static, E: Extrapolation + 'static> Builder<C, E> {
             min_camera_angle_diff: self.min_camera_angle_diff,
             last_known_pos: self.last_known_pos.into(),
             extrapolation: self.extrapolation.into(),
-            cancel_token: CancellationToken::new(),
             motion_data: self.motion_data.into(),
             send_events: AtomicBool::new(false),
             data_validity: self.data_validity,
+            cancel_token: self.cancel_token,
             clients: self.clients.into(),
             compass: self.compass.into(),
             start_time,
