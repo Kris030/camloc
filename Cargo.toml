@@ -1,2 +1,3 @@
 [workspace]
 members = ["common", "organizer", "client", "server", "calibration"]
+resolver = "2"
