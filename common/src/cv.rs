@@ -7,14 +7,14 @@ use opencv::{
     highgui,
     objdetect::{self, CharucoBoard, CharucoDetector, CharucoParameters},
     prelude::*,
-    types,
+    types, Result,
 };
 
-pub fn get_aruco_dictionary() -> opencv::Result<objdetect::Dictionary> {
+pub fn get_aruco_dictionary() -> Result<objdetect::Dictionary> {
     objdetect::get_predefined_dictionary(objdetect::PredefinedDictionaryType::DICT_4X4_50)
 }
 
-pub fn generate_board(width: u8, height: u8) -> opencv::Result<CharucoBoard> {
+pub fn generate_board(width: u8, height: u8) -> Result<CharucoBoard> {
     CharucoBoard::new(
         core::Size::new(width as i32, height as i32),
         0.04,
@@ -28,7 +28,7 @@ pub fn find_board(
     image: &Mat,
     board: &CharucoBoard,
     include_markers: bool,
-) -> opencv::Result<Option<FoundBoard>> {
+) -> Result<Option<FoundBoard>> {
     let marker_detector = objdetect::ArucoDetector::new(
         &get_aruco_dictionary()?,
         &objdetect::DetectorParameters::default()?,
@@ -97,7 +97,7 @@ pub fn find_board(
     }))
 }
 
-pub fn display_image(image: &Mat, title: &str, destroy: bool) -> opencv::Result<()> {
+pub fn display_image(image: &Mat, title: &str, destroy: bool) -> Result<()> {
     highgui::imshow(title, image)?;
 
     // pressed q
@@ -110,7 +110,7 @@ pub fn display_image(image: &Mat, title: &str, destroy: bool) -> opencv::Result<
     Ok(())
 }
 
-pub fn draw_board(image: &mut Mat, board: &FoundBoard) -> opencv::Result<()> {
+pub fn draw_board(image: &mut Mat, board: &FoundBoard) -> Result<()> {
     objdetect::draw_detected_corners_charuco(
         image,
         &board.corners,
@@ -120,7 +120,7 @@ pub fn draw_board(image: &mut Mat, board: &FoundBoard) -> opencv::Result<()> {
     Ok(())
 }
 
-pub fn draw_charuco_board(image: &mut Mat, board: &FoundBoard) -> opencv::Result<()> {
+pub fn draw_charuco_board(image: &mut Mat, board: &FoundBoard) -> Result<()> {
     draw_board(image, board)?;
     if let Some(markers) = &board.markers {
         objdetect::draw_detected_markers(
@@ -137,7 +137,7 @@ pub fn calibrate(
     board: &CharucoBoard,
     images: &[Mat],
     image_size: core::Size,
-) -> opencv::Result<FullCameraInfo> {
+) -> Result<FullCameraInfo> {
     let (mut charuco_corners, mut charuco_ids) = (
         types::VectorOfVectorOfPoint2f::new(),
         types::VectorOfVectorOfi32::new(),
@@ -201,7 +201,7 @@ pub struct CameraParams {
 }
 
 impl CameraParams {
-    pub fn to_full(&self, image_size: core::Size) -> opencv::Result<FullCameraInfo> {
+    pub fn to_full(&self, image_size: core::Size) -> Result<FullCameraInfo> {
         let k: Vec<f64> = self
             .camera_matrix
             .to_vec_2d::<f64>()?
@@ -233,7 +233,7 @@ impl Clone for CameraParams {
 }
 
 impl CameraParams {
-    pub fn save(&self, filename: &str) -> opencv::Result<()> {
+    pub fn save(&self, filename: &str) -> Result<()> {
         let mut fs = FileStorage::new(filename, core::FileStorage_WRITE, "")?;
 
         fs.write_mat("camera_matrix", &self.camera_matrix)?;
@@ -245,7 +245,7 @@ impl CameraParams {
         Ok(())
     }
 
-    pub fn load(filename: &str) -> opencv::Result<Self> {
+    pub fn load(filename: &str) -> Result<Self> {
         let mut fs = FileStorage::new(filename, core::FileStorage_READ, "")?;
 
         let camera_matrix = fs.get("camera_matrix")?.mat()?;

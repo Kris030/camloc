@@ -44,24 +44,18 @@ pub enum Event {
     InfoUpdate(SocketAddr, PlacedCamera),
 }
 
-struct Inner<C, E> {
+struct Shared<E> {
     last_known_pos: RwLock<Option<TimedPosition>>,
     motion_data: RwLock<Option<MotionData>>,
-    event_tx: watch::Sender<Option<Event>>,
     cancel_token: CancellationToken,
-    clients: Mutex<Vec<Client>>,
-    min_camera_angle_diff: f64,
-    extrapolation: RwLock<E>,
     send_events: AtomicBool,
-    data_validity: Duration,
-    start_time: Instant,
-    compass: Mutex<C>,
+    extrapolation: Mutex<E>,
 }
 
-pub struct LocationService<C, E> {
+pub struct LocationService<E> {
     service_task_handle: Option<JoinHandle<Result<()>>>,
     event_rx: watch::Receiver<Option<Event>>,
-    service_handle: Arc<Inner<C, E>>,
+    service_handle: Arc<Shared<E>>,
     data_validity: Duration,
 }
 
@@ -165,53 +159,66 @@ impl Default for Builder<NoCompass, LinearExtrapolation> {
 }
 
 impl<C: Compass + 'static, E: Extrapolation + 'static> Builder<C, E> {
-    pub async fn start(self) -> Result<LocationService<C, E>> {
+    pub async fn start(self) -> Result<LocationService<E>> {
         let start_time = Instant::now();
         let udp_socket = UdpSocket::bind(self.address).await?;
 
         let (event_tx, event_rx) = watch::channel(None);
 
-        let instance = Inner {
-            min_camera_angle_diff: self.min_camera_angle_diff,
+        let instance = Shared {
             last_known_pos: self.last_known_pos.into(),
             extrapolation: self.extrapolation.into(),
             motion_data: self.motion_data.into(),
             send_events: AtomicBool::new(false),
-            data_validity: self.data_validity,
             cancel_token: self.cancel_token,
-            clients: self.clients.into(),
-            compass: self.compass.into(),
+        };
+        let shared_handle = Arc::new(instance);
+
+        let background = Background {
+            min_camera_angle_diff: self.min_camera_angle_diff,
+            data_validity: self.data_validity,
+            shared: shared_handle.clone(),
+            clients: self.clients,
+            compass: self.compass,
             start_time,
             event_tx,
         };
-
-        let service_handle = Arc::new(instance);
-        let service_task_handle = Some(spawn(service_handle.clone().run(udp_socket)));
+        let service_task_handle = Some(spawn(background.run(udp_socket)));
 
         Ok(LocationService {
             data_validity: self.data_validity,
             event_rx,
             service_task_handle,
-            service_handle,
+            service_handle: shared_handle,
         })
     }
 }
 
-impl<C: Compass, E: Extrapolation> Inner<C, E> {
+struct Background<C, E> {
+    event_tx: watch::Sender<Option<Event>>,
+    min_camera_angle_diff: f64,
+    data_validity: Duration,
+    clients: Vec<Client>,
+    start_time: Instant,
+    shared: Arc<Shared<E>>,
+    compass: C,
+}
+
+impl<C: Compass, E: Extrapolation> Background<C, E> {
     fn send_event(&self, e: Event) -> Result<()> {
-        if self.send_events.load(Ordering::SeqCst) {
+        if self.shared.send_events.load(Ordering::SeqCst) {
             self.event_tx.send(Some(e))?;
         }
         Ok(())
     }
 
-    async fn run(self: Arc<Self>, sock: UdpSocket) -> Result<()> {
+    async fn run(mut self, sock: UdpSocket) -> Result<()> {
         let mut buf = [0u8; 64];
 
         let (cube, _organizer) = loop {
             let (len, addr) = tokio::select! {
                 r = sock.recv_from(&mut buf) => r,
-                _ = self.cancel_token.cancelled() => return Ok(())
+                _ = self.shared.cancel_token.cancelled() => return Ok(())
             }?;
 
             match buf[..len].try_into() {
@@ -235,7 +242,7 @@ impl<C: Compass, E: Extrapolation> Inner<C, E> {
         loop {
             let (recv_len, recv_addr) = tokio::select! {
                 r = sock.recv_from(&mut buf) => r,
-                _ = self.cancel_token.cancelled() => return Ok(())
+                _ = self.shared.cancel_token.cancelled() => return Ok(())
             }?;
 
             let recv_time = Instant::now();
@@ -269,9 +276,7 @@ impl<C: Compass, E: Extrapolation> Inner<C, E> {
 
                     let mut data = vec![];
 
-                    let mut clients = self.clients.lock().await;
-
-                    for (i, c) in clients.iter_mut().enumerate() {
+                    for (i, c) in self.clients.iter_mut().enumerate() {
                         let data_age = c.last_data.last_changed();
                         if data_age < oldest_data_age {
                             oldest_data_age = data_age;
@@ -289,20 +294,12 @@ impl<C: Compass, E: Extrapolation> Inner<C, E> {
 
                         data.push((client_data, c.camera));
                     }
-                    drop(clients);
 
                     // if we had a legit update
                     if let Some(client_index) = updated_client_index {
                         // and it was the client that was last updated
                         if oldest_data_index == client_index {
-                            self.update_position(
-                                self.start_time,
-                                recv_time,
-                                self.min_camera_angle_diff,
-                                &data[..],
-                                cube,
-                            )
-                            .await?;
+                            self.update_position(recv_time, &data[..], cube).await?;
                         }
                     }
                 }
@@ -310,7 +307,7 @@ impl<C: Compass, E: Extrapolation> Inner<C, E> {
                 // connection request
                 Ok(Command::Connect { position, fov }) => {
                     let camera = PlacedCamera::new(position, fov);
-                    self.clients.lock().await.push(Client {
+                    self.clients.push(Client {
                         address: recv_addr,
                         camera,
                         last_data: TimeValidated::new_with_change(
@@ -327,30 +324,32 @@ impl<C: Compass, E: Extrapolation> Inner<C, E> {
                     client_ip,
                     position,
                     fov,
-                }) => {
-                    let mut clients = self.clients.lock().await;
-                    for c in clients.iter_mut() {
-                        if c.address.ip().to_string() == client_ip {
-                            c.camera.position = position;
-                            if let Some(fov) = fov {
-                                c.camera.fov = fov;
-                            }
+                }) => 'update: {
+                    let ev = 'loopy: {
+                        for c in self.clients.iter_mut() {
+                            if c.address.ip().to_string() == client_ip {
+                                c.camera.position = position;
+                                if let Some(fov) = fov {
+                                    c.camera.fov = fov;
+                                }
 
-                            self.send_event(Event::InfoUpdate(c.address, c.camera))?;
-                            break;
+                                break 'loopy Event::InfoUpdate(c.address, c.camera);
+                            }
                         }
-                    }
+
+                        break 'update;
+                    };
+                    self.send_event(ev)?;
                 }
 
                 Ok(Command::Stop) => break,
 
                 Ok(Command::ClientDisconnect) => {
-                    let mut clients = self.clients.lock().await;
-                    for i in 0..clients.len() {
-                        if clients[i].address == recv_addr {
-                            clients.remove(i);
+                    for i in 0..self.clients.len() {
+                        if self.clients[i].address == recv_addr {
+                            self.clients.remove(i);
 
-                            self.send_event(Event::Disconnect(clients[i].address))?;
+                            self.send_event(Event::Disconnect(self.clients[i].address))?;
                             break;
                         }
                     }
@@ -362,8 +361,6 @@ impl<C: Compass, E: Extrapolation> Inner<C, E> {
 
         try_join_all(
             self.clients
-                .lock()
-                .await
                 .iter()
                 .map(|c| async { sock.send_to(&[Command::STOP], c.address).await }),
         )
@@ -373,22 +370,18 @@ impl<C: Compass, E: Extrapolation> Inner<C, E> {
     }
 
     async fn update_position(
-        self: &Arc<Self>,
-        start_time: Instant,
+        &mut self,
         recv_time: Instant,
-        min_camera_angle_diff: f64,
         data: &[(Option<ClientData>, PlacedCamera)],
         cube: [u8; 4],
     ) -> Result<()> {
-        let mut compass = self.compass.lock().await;
-        let compass_value = compass.get_value().await;
-        drop(compass);
+        let compass_value = self.compass.get_value().await;
 
-        let mut last_pos = self.last_known_pos.write().await;
-        let motion_data = *self.motion_data.read().await;
+        let mut last_pos = self.shared.last_known_pos.write().await;
+        let motion_data = *self.shared.motion_data.read().await;
 
         let Some(position) = calculate_position(
-            min_camera_angle_diff,
+            self.min_camera_angle_diff,
             data,
             motion_data,
             compass_value,
@@ -399,16 +392,19 @@ impl<C: Compass, E: Extrapolation> Inner<C, E> {
         };
 
         let calculated_position = TimedPosition {
-            position,
-            start_time,
-            time: recv_time,
+            start_time: self.start_time,
             extrapolated_by: None,
+            time: recv_time,
+            position,
         };
 
         *last_pos = Some(calculated_position);
 
-        let mut ex = self.extrapolation.write().await;
-        ex.add_datapoint(calculated_position);
+        self.shared
+            .extrapolation
+            .lock()
+            .await
+            .add_datapoint(calculated_position);
 
         self.send_event(Event::PositionUpdate(calculated_position.position))?;
 
@@ -428,7 +424,7 @@ pub trait LocationServiceTrait: Send + Sync {
 }
 
 #[async_trait]
-impl<C: Compass, E: Extrapolation> LocationServiceTrait for LocationService<C, E> {
+impl<E: Extrapolation> LocationServiceTrait for LocationService<E> {
     async fn set_motion_hint(&self, hint: Option<MotionHint>) {
         let pos_handle = self.service_handle.last_known_pos.read().await;
         let Some(pos) = *pos_handle else {
@@ -467,7 +463,7 @@ impl<C: Compass, E: Extrapolation> LocationServiceTrait for LocationService<C, E
 
         let now = Instant::now();
 
-        let ex = self.service_handle.extrapolation.read().await;
+        let ex = self.service_handle.extrapolation.lock().await;
         if now > pos.time + self.data_validity {
             return None;
         }
@@ -484,7 +480,7 @@ impl<C: Compass, E: Extrapolation> LocationServiceTrait for LocationService<C, E
     }
 }
 
-impl<C, E> Drop for LocationService<C, E> {
+impl<E> Drop for LocationService<E> {
     fn drop(&mut self) {
         self.service_handle.cancel_token.cancel();
     }

@@ -29,21 +29,24 @@ pub mod constants {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HostType {
     Client { calibrated: bool },
     ConfiglessClient,
     Server,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct HostInfo {
     pub host_state: HostState,
     pub host_type: HostType,
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("Tried to convert unreachable host to u8, which shouldn't happen")]
+pub struct ConvertUnreachableHost;
 impl TryInto<u8> for HostInfo {
-    type Error = ();
+    type Error = ConvertUnreachableHost;
 
     fn try_into(self) -> Result<u8, Self::Error> {
         use constants::status_reply::{host_type::*, masks, state::*};
@@ -63,7 +66,7 @@ impl TryInto<u8> for HostInfo {
             ConfiglessClient => CONFIGLESS,
             Server => SERVER,
         } | (match self.host_state {
-            Unreachable => return Err(()),
+            Unreachable => return Err(ConvertUnreachableHost),
             Running => RUNNING,
             Idle => IDLE,
         }))
@@ -104,7 +107,7 @@ impl TryFrom<u8> for HostInfo {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HostState {
     Unreachable,
     Running,
@@ -112,7 +115,7 @@ pub enum HostState {
 }
 
 #[must_use]
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Command<'a> {
     Ping,
 
@@ -305,7 +308,7 @@ impl<'a> TryFrom<&'a mut [u8]> for Command<'a> {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ClientData {
     pub x_position: f64,
     pub marker_id: u8,

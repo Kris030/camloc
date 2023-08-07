@@ -1,9 +1,9 @@
 use std::{
     fmt::Display,
+    str::FromStr,
     time::{Duration, Instant},
 };
-
-use anyhow::{anyhow, Result};
+use thiserror::Error as ThisError;
 
 #[cfg(feature = "cv")]
 pub mod cv;
@@ -23,7 +23,19 @@ impl Lerp for f64 {
     }
 }
 
-pub fn get_from_stdin<T: std::str::FromStr>(prompt: &str) -> Result<T> {
+#[derive(Debug, ThisError)]
+pub enum GetFromStdinError<P> {
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+
+    #[error(transparent)]
+    Parse(P),
+}
+
+pub fn get_from_stdin<T>(prompt: &str) -> Result<T, GetFromStdinError<<T as FromStr>::Err>>
+where
+    T: FromStr,
+{
     use std::io::Write;
 
     let mut stdout = std::io::stdout().lock();
@@ -34,14 +46,8 @@ pub fn get_from_stdin<T: std::str::FromStr>(prompt: &str) -> Result<T> {
     let mut l = String::new();
     std::io::stdin().read_line(&mut l)?;
 
-    if l.is_empty() {
-        return Err(anyhow!("Empty value"));
-    }
-
     // exclude newline at the end
-    l[..l.len() - 1]
-        .parse()
-        .map_err(|_| anyhow!("Invalid value"))
+    l[..l.len() - 1].parse().map_err(GetFromStdinError::Parse)
 }
 
 pub fn yes_no_choice(prompt: &str, default: bool) -> bool {
@@ -54,11 +60,20 @@ pub fn yes_no_choice(prompt: &str, default: bool) -> bool {
     }
 }
 
+#[derive(Debug, ThisError)]
+pub enum ChoiceError {
+    #[error("{0}")]
+    GetFromStdin(#[from] GetFromStdinError<<usize as FromStr>::Err>),
+
+    #[error("Invalid choice: {0}, no default")]
+    NoDefault(usize),
+}
+
 pub fn choice<T: Display>(
     listed: impl Iterator<Item = (T, bool)>,
     choice_prompt: Option<&str>,
     default_choice: Option<usize>,
-) -> Result<usize> {
+) -> Result<usize, ChoiceError> {
     let mut mapping = vec![];
     for (i, (c, is_choice)) in listed.enumerate() {
         if is_choice {
@@ -71,15 +86,17 @@ pub fn choice<T: Display>(
         println!("{c}");
     }
 
-    get_from_stdin::<usize>(choice_prompt.unwrap_or("Enter choice: "))
-        .and_then(|v| {
-            if v >= mapping.len() {
-                Err(anyhow!("No such choice"))
-            } else {
-                Ok(mapping[v])
-            }
-        })
-        .or(default_choice.ok_or(anyhow!("No valid default was provided")))
+    let v = get_from_stdin::<usize>(choice_prompt.unwrap_or("Enter choice: "))?;
+
+    if v >= mapping.len() {
+        if let Some(def) = default_choice {
+            Ok(def)
+        } else {
+            Err(ChoiceError::NoDefault(v))
+        }
+    } else {
+        Ok(mapping[v])
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

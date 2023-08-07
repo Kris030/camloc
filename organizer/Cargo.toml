@@ -9,7 +9,9 @@ license = "MIT"
 
 [dependencies]
 camloc-common = { path = "../common", version = "0.1", features = ["cv"] }
-clap = { version = "4.3.0", features = ["derive"] }
-network-interface = "1.0"
+thiserror = "1.0.44"
 opencv = "0.84"
+
+[dev-dependencies]
+clap = { version = "4.3.0", features = ["derive"] }
 anyhow = "1"
