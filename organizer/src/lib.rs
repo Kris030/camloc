@@ -426,7 +426,10 @@ impl<'o, const BUFFER_SIZE: usize> Organizer<'o, BUFFER_SIZE> {
                 Ok((1, addr)) => addr,
                 Ok(_) => continue,
 
-                Err(e) => Err(e)?,
+                Err(e) => match e.kind() {
+                    std::io::ErrorKind::WouldBlock => continue,
+                    e => Err(std::io::Error::from(e))?,
+                },
             };
 
             let IpAddr::V4(ip) = addr.ip() else {

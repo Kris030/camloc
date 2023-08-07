@@ -208,7 +208,14 @@ fn handle_commands<const BUFFER_SIZE: usize>(
     organizer: &mut Organizer<'_, BUFFER_SIZE>,
     interface: CliInterface,
 ) -> Result<()> {
-    let server = organizer.get_server()?;
+    let server = match organizer.get_server() {
+        Ok(s) => s,
+        Err(_) => {
+            println!("No server running");
+            return Ok(());
+        }
+    };
+
     if let HostState::Idle = server.info().host_state {
         if !yes_no_choice("Server isn't running, do you want to start it?", true) {
             return Ok(());
