@@ -12,4 +12,3 @@ camloc-common = { path = "../common", version = "0.1", features = ["cv"] }
 clap = { version = "4.3.0", features = ["derive"] }
 opencv = "0.84"
 anyhow = "1"
-ctrlc = "3.4"

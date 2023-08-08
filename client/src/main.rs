@@ -2,7 +2,7 @@ mod aruco;
 mod util;
 
 use crate::aruco::Aruco;
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use camloc_common::{
     cv::FullCameraInfo,
     hosts::{
@@ -18,9 +18,8 @@ use opencv::{
 };
 use std::{
     fs::File,
-    io::{ErrorKind, Read, Write},
+    io::{Read, Write},
     net::{IpAddr, SocketAddr, TcpStream, UdpSocket},
-    time::Duration,
 };
 
 const BUF_SIZE: usize = 2048;
@@ -32,15 +31,6 @@ struct Config {
 }
 
 impl Config {
-    fn to_connection_request(&self, position: Position) -> Option<[u8; 33]> {
-        Into::<Vec<u8>>::into(Command::Connect {
-            position,
-            fov: self.calibration.horizontal_fov,
-        })
-        .try_into()
-        .ok()
-    }
-
     fn from_organizer(
         r: &mut impl Read,
         cached_calibration: &Option<FullCameraInfo>,
@@ -104,16 +94,6 @@ fn main() -> Result<()> {
         Args::parse()
     };
 
-    // TODO: ctrl+c handling
-    // let (tx, rx) = std::sync::mpsc::channel::<()>();
-    // ctrlc::set_handler(move || {
-    //     let _ = tx.send(());
-    // })
-    // .map_err(|_| "Couldn't set ctr+c handler")?;
-    // if rx.recv_timeout(Duration::from_millis(1)).is_ok() {
-
-    // }
-
     let cached_calibration = if let Ok(mut f) = File::open(&args.calibration_cache) {
         println!("Found calibration file");
         FullCameraInfo::from_be_bytes(&mut f).ok()
@@ -122,6 +102,7 @@ fn main() -> Result<()> {
     };
 
     let mut frame = Mat::default();
+    let mut draw = if args.gui { Some(Mat::default()) } else { None };
 
     let socket = UdpSocket::bind(("0.0.0.0", MAIN_PORT))?;
     let mut buf = [0; BUF_SIZE];
@@ -142,11 +123,11 @@ fn main() -> Result<()> {
                                 calibrated: cached_calibration.is_some(),
                             },
                             host_state: HostState::Idle,
-                        })
-                        .unwrap()],
+                        })?],
                         addr,
                     )?;
                 }
+
                 _ => continue,
             }
         };
@@ -168,10 +149,22 @@ fn main() -> Result<()> {
             }
         };
 
-        // connect to server
-        socket.send_to(&config.to_connection_request(pos).unwrap(), config.server)?;
+        socket.send_to(
+            &Into::<Vec<u8>>::into(Command::Connect {
+                fov: config.calibration.horizontal_fov,
+                position: pos,
+            }),
+            config.server,
+        )?;
 
-        inner_loop(&socket, &mut cam, config, &mut buf, &mut frame, args.gui)?;
+        inner_loop(
+            &socket,
+            &mut cam,
+            config,
+            &mut buf,
+            &mut frame,
+            draw.as_mut(),
+        )?;
     }
 }
 
@@ -180,69 +173,60 @@ fn inner_loop(
     cam: &mut VideoCapture,
     config: Config,
     buf: &mut [u8],
-    mut frame: &mut Mat,
-    gui: bool,
+    frame: &mut Mat,
+    mut draw: Option<&mut Mat>,
 ) -> Result<()> {
-    let mut draw = Mat::default();
     let mut aruco = Aruco::new(config.cube)?;
 
-    if gui {
+    if draw.is_some() {
         highgui::named_window("videocap", highgui::WINDOW_AUTOSIZE)?;
     }
 
-    let stopped_by_server = loop {
-        let read_timeout = socket.read_timeout()?;
+    let stopped_by_server;
 
-        socket.set_read_timeout(Some(Duration::from_millis(1)))?;
+    loop {
+        let (len, addr) = socket.recv_from(buf)?;
 
-        match socket.recv_from(buf) {
-            Ok((len, addr)) => match buf[..len].try_into() {
-                Ok(Command::Stop) => break true,
+        match buf[..len].try_into() {
+            Ok(Command::Stop) => break stopped_by_server = addr == config.server,
 
-                Ok(Command::Ping) => {
-                    socket.send_to(
-                        &[HostInfo {
-                            host_type: HostType::Client { calibrated: true },
-                            host_state: HostState::Running,
-                        }
-                        .try_into()
-                        .unwrap()],
-                        addr,
-                    )?;
-                }
+            Ok(Command::Ping) => {
+                socket.send_to(
+                    &[HostInfo {
+                        host_type: HostType::Client { calibrated: true },
+                        host_state: HostState::Running,
+                    }
+                    .try_into()?],
+                    addr,
+                )?;
+            }
 
-                _ => (),
-            },
-            Err(e) if matches!(e.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock) => (),
-            Err(_) => Err(anyhow!("Error while receiving command"))?,
+            _ => (),
         }
 
-        socket.set_read_timeout(read_timeout)?;
-
-        if gui && highgui::wait_key(10)? == 113 {
-            break false;
+        if draw.is_some() && highgui::wait_key(10)? == 113 {
+            break stopped_by_server = false;
         }
 
-        // find & send x value
-        cam.read(&mut frame)?;
+        cam.read(frame)?;
 
-        if gui {
-            frame.copy_to(&mut draw)?;
+        if let Some(draw) = draw.as_deref_mut() {
+            frame.copy_to(draw)?;
         }
 
-        if let Some(data) = aruco.detect(frame, if gui { Some(&mut draw) } else { None })? {
+        if let Some(data) = aruco.detect(frame, draw.as_deref_mut())? {
             socket.send_to(
                 &Into::<Vec<u8>>::into(Command::ValueUpdate(data)),
                 config.server,
             )?;
         }
 
-        if gui {
-            highgui::imshow("videocap", &draw)?;
+        if let Some(draw) = draw.as_deref_mut() {
+            highgui::imshow("videocap", draw)?;
         }
-    };
+    }
 
-    if gui {
+    if draw.is_some() {
         highgui::destroy_all_windows()?;
     }
 
