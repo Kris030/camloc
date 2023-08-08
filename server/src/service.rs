@@ -8,16 +8,13 @@ use futures::future::try_join_all;
 use std::{
     f64::NAN,
     net::{Ipv4Addr, SocketAddr},
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::{
     net::UdpSocket,
     spawn,
-    sync::{watch, Mutex, RwLock},
+    sync::{broadcast, Mutex, RwLock},
     task::JoinHandle,
 };
 use tokio_util::sync::CancellationToken;
@@ -47,14 +44,13 @@ pub enum Event {
 struct Shared<E> {
     last_known_pos: RwLock<Option<TimedPosition>>,
     motion_data: RwLock<Option<MotionData>>,
+    event_tx: broadcast::Sender<Event>,
     cancel_token: CancellationToken,
-    send_events: AtomicBool,
     extrapolation: Mutex<E>,
 }
 
 pub struct LocationService<E> {
     service_task_handle: Option<JoinHandle<Result<()>>>,
-    event_rx: watch::Receiver<Option<Event>>,
     service_handle: Arc<Shared<E>>,
     data_validity: Duration,
 }
@@ -163,14 +159,15 @@ impl<C: Compass + 'static, E: Extrapolation + 'static> Builder<C, E> {
         let start_time = Instant::now();
         let udp_socket = UdpSocket::bind(self.address).await?;
 
-        let (event_tx, event_rx) = watch::channel(None);
+        let (event_tx, event_rx) = broadcast::channel(1024);
+        drop(event_rx);
 
         let instance = Shared {
             last_known_pos: self.last_known_pos.into(),
             extrapolation: self.extrapolation.into(),
             motion_data: self.motion_data.into(),
-            send_events: AtomicBool::new(false),
             cancel_token: self.cancel_token,
+            event_tx: event_tx.clone(),
         };
         let shared_handle = Arc::new(instance);
 
@@ -187,29 +184,25 @@ impl<C: Compass + 'static, E: Extrapolation + 'static> Builder<C, E> {
 
         Ok(LocationService {
             data_validity: self.data_validity,
-            event_rx,
-            service_task_handle,
             service_handle: shared_handle,
+            service_task_handle,
         })
     }
 }
 
 struct Background<C, E> {
-    event_tx: watch::Sender<Option<Event>>,
+    event_tx: broadcast::Sender<Event>,
     min_camera_angle_diff: f64,
     data_validity: Duration,
+    shared: Arc<Shared<E>>,
     clients: Vec<Client>,
     start_time: Instant,
-    shared: Arc<Shared<E>>,
     compass: C,
 }
 
 impl<C: Compass, E: Extrapolation> Background<C, E> {
-    fn send_event(&self, e: Event) -> Result<()> {
-        if self.shared.send_events.load(Ordering::SeqCst) {
-            self.event_tx.send(Some(e))?;
-        }
-        Ok(())
+    fn send_event(&self, e: Event) {
+        let _ = self.event_tx.send(e);
     }
 
     async fn run(mut self, sock: UdpSocket) -> Result<()> {
@@ -317,7 +310,7 @@ impl<C: Compass, E: Extrapolation> Background<C, E> {
                         ),
                     });
 
-                    self.send_event(Event::Connect(recv_addr, camera))?;
+                    self.send_event(Event::Connect(recv_addr, camera));
                 }
 
                 Ok(Command::InfoUpdate {
@@ -339,7 +332,7 @@ impl<C: Compass, E: Extrapolation> Background<C, E> {
 
                         break 'update;
                     };
-                    self.send_event(ev)?;
+                    self.send_event(ev);
                 }
 
                 Ok(Command::Stop) => break,
@@ -349,7 +342,7 @@ impl<C: Compass, E: Extrapolation> Background<C, E> {
                         if self.clients[i].address == recv_addr {
                             self.clients.remove(i);
 
-                            self.send_event(Event::Disconnect(self.clients[i].address))?;
+                            self.send_event(Event::Disconnect(self.clients[i].address));
                             break;
                         }
                     }
@@ -406,7 +399,7 @@ impl<C: Compass, E: Extrapolation> Background<C, E> {
             .await
             .add_datapoint(calculated_position);
 
-        self.send_event(Event::PositionUpdate(calculated_position.position))?;
+        self.send_event(Event::PositionUpdate(calculated_position.position));
 
         Ok(())
     }
@@ -415,10 +408,7 @@ impl<C: Compass, E: Extrapolation> Background<C, E> {
 #[async_trait]
 pub trait LocationServiceTrait: Send + Sync {
     async fn set_motion_hint(&self, hint: Option<MotionHint>);
-    async fn enable_events(&self);
-    async fn set_events(&self, enable: bool);
-    async fn disable_events(&self);
-    async fn get_event(&mut self) -> Result<Event>;
+    fn get_event_channel(&self) -> broadcast::Receiver<Event>;
     async fn get_position(&self) -> Option<Position>;
     async fn stop(self) -> Result<()>;
 }
@@ -436,20 +426,8 @@ impl<E: Extrapolation> LocationServiceTrait for LocationService<E> {
         *self.service_handle.motion_data.write().await = new_hint;
     }
 
-    async fn enable_events(&self) {
-        self.set_events(true).await
-    }
-    async fn set_events(&self, enable: bool) {
-        self.service_handle
-            .send_events
-            .store(enable, Ordering::SeqCst);
-    }
-    async fn disable_events(&self) {
-        self.set_events(false).await
-    }
-
-    async fn get_event(&mut self) -> Result<Event> {
-        Ok(self.event_rx.wait_for(|e| e.is_some()).await?.unwrap())
+    fn get_event_channel(&self) -> broadcast::Receiver<Event> {
+        self.service_handle.event_tx.subscribe()
     }
 
     async fn get_position(&self) -> Option<Position> {

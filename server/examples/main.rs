@@ -141,9 +141,7 @@ async fn run() -> Result<()> {
     #[cfg(feature = "serial-compass")]
     let service = service.with_compass(get_compass().await?);
 
-    let mut service = service.start().await?;
-
-    service.enable_events().await;
+    let service = service.start().await?;
 
     let cancell_parent = CancellationToken::new();
     let cancell = cancell_parent.child_token();
@@ -153,9 +151,11 @@ async fn run() -> Result<()> {
     });
 
     if yes_no_choice("Subscription mode (or query)?", true) {
+        let mut chan = service.get_event_channel();
+
         loop {
             let ev = tokio::select! {
-                e = service.get_event() => e,
+                e = chan.recv() => e,
                 _ = cancell.cancelled() => break
             }?;
 
