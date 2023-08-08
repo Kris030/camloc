@@ -1,6 +1,6 @@
 [package]
 name = "camloc-server"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Kris030"]
 edition = "2021"
 description = "A DIY GPS for a dank engine."
@@ -11,7 +11,7 @@ license = "MIT"
 [dependencies]
 tokio-serial = { version = "5.4", optional = true, features = ["libudev"] }
 serde = { version = "1", optional = true, features = ["derive"] }
-camloc-common = { path = "../common", version = "0.1" }
+camloc-common = { path = "../common", version = "0.2" }
 tokio = { version = "1.28", features = ["full"] }
 tokio-util = "0.7.8"
 async-trait = "0.1"

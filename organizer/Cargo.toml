@@ -8,7 +8,7 @@ repository = "https://github.com/Kris030/camloc"
 license = "MIT"
 
 [dependencies]
-camloc-common = { path = "../common", version = "0.1", features = ["cv"] }
+camloc-common = { path = "../common", version = "0.2", features = ["cv"] }
 thiserror = "1.0.44"
 opencv = "0.84"
 
