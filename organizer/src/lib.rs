@@ -226,8 +226,8 @@ impl<'o, const BUFFER_SIZE: usize> Organizer<'o, BUFFER_SIZE> {
             if matches!(
                 h.info,
                 HostInfo {
-                    host_type: HostType::Client { .. } | HostType::ConfiglessClient,
-                    host_state: HostState::Idle
+                    host_type: HostType::Server,
+                    host_state: HostState::Idle | HostState::Running
                 },
             ) {
                 si = match si {

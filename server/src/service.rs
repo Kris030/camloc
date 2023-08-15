@@ -7,7 +7,7 @@ use camloc_common::{
 use futures::future::try_join_all;
 use std::{
     f64::NAN,
-    net::{Ipv4Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -70,7 +70,7 @@ pub struct Builder<C, E> {
 impl Builder<NoCompass, LinearExtrapolation> {
     pub fn new() -> Self {
         Self {
-            address: (Ipv4Addr::LOCALHOST, MAIN_PORT).into(),
+            address: SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), MAIN_PORT),
             min_camera_angle_diff: 15f64.to_radians(),
             data_validity: Duration::from_millis(500),
             extrapolation: LinearExtrapolation::new(),
