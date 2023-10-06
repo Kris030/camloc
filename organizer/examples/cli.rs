@@ -75,14 +75,15 @@ macro_rules! choose_host {
         }
 
         let host_index = choice(
-            options.into_iter(),
+            options.iter().cloned(),
             Some("\nSelect client to update: "),
             None,
         )?;
 
-        $organizer.hosts()[host_index]
+        *options[host_index].0
     }};
 }
+
 fn main() -> Result<()> {
     let args = {
         use clap::Parser;
@@ -113,9 +114,9 @@ struct CliInterface {
 }
 impl CliInterface {
     fn more_inner(&self) -> Result<bool> {
-        let more = yes_no_choice("  Continue?", true);
+        let more = yes_no_choice("  Continue?", false);
         if !more {
-            opencv::highgui::destroy_window("recieved")?;
+            let _ = opencv::highgui::destroy_window("recieved");
         }
 
         Ok(more)
