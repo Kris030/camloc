@@ -179,7 +179,9 @@ fn inner_loop(
     mut draw: Option<&mut Mat>,
 ) -> Result<()> {
     let mut aruco = Aruco::new(config.cube)?;
+    println!("initalized aruco");
     socket.set_read_timeout(Some(Duration::from_millis(1)))?;
+    println!("set read timeout");
 
     if draw.is_some() {
         highgui::named_window("videocap", highgui::WINDOW_AUTOSIZE)?;
@@ -188,24 +190,28 @@ fn inner_loop(
     let stopped_by_server;
 
     loop {
-        let (len, addr) = socket.recv_from(buf)?;
+        match socket.recv_from(buf) {
+            Ok((len, addr)) => match buf[..len].try_into() {
+                Ok(Command::Stop) => break stopped_by_server = addr == config.server,
 
-        match buf[..len].try_into() {
-            Ok(Command::Stop) => break stopped_by_server = addr == config.server,
+                Ok(Command::Ping) => {
+                    socket.send_to(
+                        &[HostInfo {
+                            host_type: HostType::Client { calibrated: true },
+                            host_state: HostState::Running,
+                        }
+                        .try_into()?],
+                        addr,
+                    )?;
+                }
 
-            Ok(Command::Ping) => {
-                socket.send_to(
-                    &[HostInfo {
-                        host_type: HostType::Client { calibrated: true },
-                        host_state: HostState::Running,
-                    }
-                    .try_into()?],
-                    addr,
-                )?;
-            }
+                _ => (),
+            },
 
-            _ => (),
-        }
+            Err(e) if e.kind() != std::io::ErrorKind::TimedOut => {}
+
+            Err(e) => Err(e)?,
+        };
 
         if draw.is_some() && highgui::wait_key(10)? == 113 {
             break stopped_by_server = false;
