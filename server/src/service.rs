@@ -232,6 +232,8 @@ impl<C: Compass, E: Extrapolation> Background<C, E> {
             }
         };
 
+        println!("starting, cube: {cube:?}");
+
         loop {
             let (recv_len, recv_addr) = tokio::select! {
                 r = sock.recv_from(&mut buf) => r,
@@ -261,6 +263,7 @@ impl<C: Compass, E: Extrapolation> Background<C, E> {
                     x_position,
                 })) => {
                     let received_data = ClientData::new(marker_id, x_position);
+                    println!("{received_data:?}");
 
                     // update client data and position if the oldest data was updated
 

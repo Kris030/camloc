@@ -20,6 +20,7 @@ use std::{
     fs::File,
     io::{Read, Write},
     net::{IpAddr, SocketAddr, TcpStream, UdpSocket},
+    time::Duration,
 };
 
 const BUF_SIZE: usize = 2048;
@@ -109,6 +110,7 @@ fn main() -> Result<()> {
 
     'outer_loop: loop {
         println!("Waiting for organizer...");
+        socket.set_read_timeout(None)?;
 
         // wait for organizer ping / start
         let organizer = loop {
@@ -177,6 +179,7 @@ fn inner_loop(
     mut draw: Option<&mut Mat>,
 ) -> Result<()> {
     let mut aruco = Aruco::new(config.cube)?;
+    socket.set_read_timeout(Some(Duration::from_millis(1)))?;
 
     if draw.is_some() {
         highgui::named_window("videocap", highgui::WINDOW_AUTOSIZE)?;
